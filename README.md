@@ -34,7 +34,9 @@ v3.3.0
    ```bash
    python3 engine_monitor.py
    ```
-3. Access at: http://stratux.local:8080
+3. Access at:
+   - **Engine Monitor:** http://stratux.local:8080
+   - **Fuel Planner:** http://stratux.local:8080/fuel-planner.html
 
 ## Requirements
 
