@@ -1,0 +1,16 @@
+REMINDER: Upload to iPad after changes
+
+When changes are made to capture_v5, sync to iPad:
+
+1. Copy capture_v5 folder to iPad or Stratux device
+2. Files to upload:
+   - engine_monitor.py
+   - fuel-planner.html
+   - fuel-planner.js
+   - fuel-planner.css
+   - service-worker.js
+   - manifest.json
+   - chart.min.js
+   - HELP.html
+
+Access at: http://stratux.local:8080
