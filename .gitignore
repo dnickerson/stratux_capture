@@ -1,0 +1,35 @@
+# Compiled Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Logs
+*.log
+
+# Config state files
+*.conf
+
+# Zip archives
+*.zip
+
+# Old/backup versions
+capture_v3/
+capture_v6/
+
+# Large extracted directories
+stratux-2.0-pre4/
+stratux-full/
+
+# Test directories
+test_vibration/
+
+# Mount points
+pi-mount/
+
+# Data files
+*.csv
+*.kml
+*.txt
+!VERSION
+!help.txt
+!HELP.html
