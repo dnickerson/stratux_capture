@@ -1,16 +1,21 @@
 /**
- * Service Worker for Fuel Planner PWA
- * Provides offline caching for the standalone fuel planner
+ * Service Worker for Stratux PWA Apps
+ * Provides offline caching for the engine monitor and fuel planner
  */
 
-const CACHE_NAME = 'fuel-planner-v4';
+const CACHE_NAME = 'stratux-app-v1';
 
 // Core files required for offline operation
 const CORE_ASSETS = [
+    './',
+    './index.html',
     './fuel-planner.html',
     './fuel-planner.js',
     './fuel-planner.css',
-    './manifest.json'
+    './manifest.json',
+    './engine-monitor-manifest.json',
+    './static/chart.min.js',
+    './help'
 ];
 
 // Install event - cache core assets
@@ -93,9 +98,13 @@ self.addEventListener('fetch', event => {
                         return networkResponse;
                     })
                     .catch(() => {
-                        // Offline and not cached - return the main HTML for navigation
+                        // Offline and not cached - return cached version of the requested page
                         if (event.request.mode === 'navigate') {
-                            return caches.match('./fuel-planner.html');
+                            // Try to match the specific page, fall back to root
+                            if (url.pathname.includes('fuel-planner')) {
+                                return caches.match('./fuel-planner.html');
+                            }
+                            return caches.match('./');
                         }
                         // Return empty response for other requests
                         return new Response('', { status: 503, statusText: 'Offline' });

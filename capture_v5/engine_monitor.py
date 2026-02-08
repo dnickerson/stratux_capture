@@ -2160,6 +2160,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="manifest" href="./engine-monitor-manifest.json">
     <title>Engine Monitor</title>
     <script src="/static/chart.min.js"></script>
     <style>
@@ -2849,6 +2851,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             <div class="time-display" id="time">--:--:--</div>
             <div class="duration" id="duration"></div>
         </div>
+        <div id="connectionBadge" style="padding:4px 10px; border-radius:4px; font-size:13px; font-weight:800; text-transform:uppercase; background:#90EE90; color:#006400; border:2px solid #006400;">Connected</div>
         <div class="controls">
             <button class="btn btn-start" id="btnStart" onclick="startCapture()">Start</button>
             <button class="btn btn-stop" id="btnStop" onclick="stopCapture()">Stop</button>
@@ -3168,6 +3171,56 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     </div>
 
     <script>
+        // Offline tracking
+        let isOffline = false;
+        let statusPollId = null;
+        let filesPollId = null;
+        let chartsPollId = null;
+
+        function updateConnectionBadge(offline) {
+            const badge = document.getElementById('connectionBadge');
+            if (!badge) return;
+            if (offline) {
+                badge.textContent = 'Offline';
+                badge.style.background = '#FFB6C1';
+                badge.style.color = '#CC0000';
+                badge.style.borderColor = '#CC0000';
+            } else {
+                badge.textContent = 'Connected';
+                badge.style.background = '#90EE90';
+                badge.style.color = '#006400';
+                badge.style.borderColor = '#006400';
+            }
+        }
+
+        function setOfflineState(offline) {
+            if (isOffline === offline) return;
+            isOffline = offline;
+            updateConnectionBadge(offline);
+
+            // Adjust poll intervals: slow down when offline, speed up when back online
+            clearInterval(statusPollId);
+            clearInterval(filesPollId);
+            clearInterval(chartsPollId);
+            if (offline) {
+                statusPollId = setInterval(updateStatus, 5000);
+                // Don't poll files or charts when offline
+            } else {
+                statusPollId = setInterval(updateStatus, 1000);
+                filesPollId = setInterval(updateFiles, 10000);
+                chartsPollId = setInterval(updateCharts, 2000);
+            }
+        }
+
+        // Service Worker registration for offline support
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('./service-worker.js')
+                    .then(reg => console.log('Service Worker registered, scope:', reg.scope))
+                    .catch(err => console.error('Service Worker registration failed:', err));
+            });
+        }
+
         // Flight Data Recorder - Client-side CSV recording with localStorage persistence
         const CSV_HEADER = 'Zulu_Time,MP,Oil Temp,Oil Pressure,Fuel Pressure,Volts,Amps,RPM,Fuel Flow,Gallons Remaining,Fuel Level 1,Fuel Level 2,Carb Temp,GP 2,GP 3,Thermalcouple,EGT 1,EGT 2,EGT 3,EGT 4,CHT 1,CHT 2,CHT 3,CHT 4,date,time_z,longitude,latitude,altitude_ft,speed_kts,bank,pitch,acc_vert,course,EGT Spread,CHT Spread,Max EGT,Final_Percent_Power,Operating_Condition,Percent,SFC';
 
@@ -3688,11 +3741,15 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                         atisOatEl.value = data.manual_oat;
                     }
                     updateAtisStyle();
+                    setOfflineState(false);
                 })
-                .catch(e => console.error('Status error:', e));
+                .catch(e => {
+                    setOfflineState(true);
+                });
         }
 
         function updateFiles() {
+            if (isOffline) return;
             fetch('/api/files')
                 .then(r => r.json())
                 .then(files => {
@@ -3951,6 +4008,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         });
 
         function updateCharts() {
+            if (isOffline) return;
             const duration = document.getElementById('chartDuration').value;
             fetch('/api/history?duration=' + duration)
                 .then(r => r.json())
@@ -4166,9 +4224,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         updateStatus();
         updateFiles();
         updateCharts();
-        setInterval(updateStatus, 1000);
-        setInterval(updateFiles, 10000);
-        setInterval(updateCharts, 2000);  // Update charts every 2 seconds
+        statusPollId = setInterval(updateStatus, 1000);
+        filesPollId = setInterval(updateFiles, 10000);
+        chartsPollId = setInterval(updateCharts, 2000);
     </script>
 </body>
 </html>
@@ -4319,8 +4377,8 @@ class RequestHandler(BaseHTTPRequestHandler):
             except FileNotFoundError:
                 self.send_json({'error': 'fuel-planner.css not found'}, 404)
 
-        elif path == '/manifest.json':
-            manifest_path = os.path.join(SCRIPT_DIR, 'manifest.json')
+        elif path == '/manifest.json' or path == '/engine-monitor-manifest.json':
+            manifest_path = os.path.join(SCRIPT_DIR, os.path.basename(path))
             try:
                 with open(manifest_path, 'rb') as f:
                     content = f.read()
@@ -4330,7 +4388,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(content)
             except FileNotFoundError:
-                self.send_json({'error': 'manifest.json not found'}, 404)
+                self.send_json({'error': os.path.basename(path) + ' not found'}, 404)
 
         elif path == '/service-worker.js':
             sw_path = os.path.join(SCRIPT_DIR, 'service-worker.js')
