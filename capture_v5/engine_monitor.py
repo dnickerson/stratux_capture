@@ -80,6 +80,7 @@ CONFIG = {
     'WEB_PORT': 8080,
     'WEB_BIND': '192.168.10.1' if _is_aircraft else '0.0.0.0',
     'ACTIVE_FILE': 'capture_active.txt',
+    'ACTIVE_CSV': 'flight_active.csv',
     'LOG_FILE': 'engine_monitor.log',
     'STRATUX_HTTP_URL': 'http://localhost/getSituation',  # Stratux HTTP API (won't interfere with ForeFlight)
     'STRATUX_POLL_INTERVAL': 1.0,  # Seconds between HTTP polls
@@ -92,6 +93,9 @@ CONFIG = {
     'PLAYBACK_RATE': 1.0,  # 1.0 = realtime, 10.0 = 10x speed
     'KML_FILE': None,
 }
+
+# Server-side CSV header (matches client format for compatibility)
+CSV_HEADER = 'Zulu_Time,MP,Oil Temp,Oil Pressure,Fuel Pressure,Volts,Amps,RPM,Fuel Flow,Gallons Remaining,Fuel Level 1,Fuel Level 2,Carb Temp,GP 2,GP 3,Thermalcouple,EGT 1,EGT 2,EGT 3,EGT 4,CHT 1,CHT 2,CHT 3,CHT 4,date,time_z,longitude,latitude,altitude_ft,speed_kts,bank,pitch,acc_vert,course,EGT Spread,CHT Spread,Max EGT,Final_Percent_Power,Operating_Condition,Percent,SFC'
 
 # Fuel tracking configuration
 FUEL_CONFIG = {
@@ -686,6 +690,8 @@ class CaptureState:
         # Server reference for shutdown
         self.server = None
         self.shutdown_requested = False
+        # Server-side CSV recording
+        self.csv_points = 0
 
 state = CaptureState()
 
@@ -1587,6 +1593,7 @@ def capture_thread_func():
     """Background thread that captures serial data or plays back from file."""
     playback_mode = CONFIG.get('PLAYBACK_MODE', False)
     out_file = None
+    csv_file = None
     ser = None
     serial_module = None  # For reconnect in live mode
 
@@ -1684,6 +1691,13 @@ def capture_thread_func():
             state.buffer_overflows = 0
             # Use line buffering (buffering=1) for efficient streaming writes
             out_file = open(active_path, 'w', buffering=1)
+
+        # Open CSV file for server-side flight recording (both live and playback)
+        csv_path = os.path.join(CONFIG['DATA_DIR'], CONFIG['ACTIVE_CSV'])
+        csv_file = open(csv_path, 'w', buffering=1)
+        csv_file.write(CSV_HEADER + '\n')
+        state.csv_points = 0
+        last_csv_time = 0  # For 1Hz throttling
 
         state.capture_start_time = datetime.now()
         state.last_data_time = time.time()
@@ -1791,6 +1805,53 @@ def capture_thread_func():
                                 fuel_right=parsed.get('Fuel_Right', 0)
                             )
 
+                        # Write CSV row at 1Hz (throttle from ~4Hz serial rate)
+                        now_csv = time.time()
+                        if csv_file and now_csv - last_csv_time >= 1.0:
+                            last_csv_time = now_csv
+                            d = parsed
+                            t = d.get('time', '')
+                            # Format time as 12-hour with AM/PM
+                            time_12 = ''
+                            if t:
+                                parts = t.split(':')
+                                if len(parts) == 3:
+                                    h = int(parts[0])
+                                    ampm = 'PM' if h >= 12 else 'AM'
+                                    h12 = h % 12 or 12
+                                    time_12 = f"{h12}:{parts[1]}:{parts[2]} {ampm}"
+                            egts = [d.get('EGT1', 0), d.get('EGT2', 0), d.get('EGT3', 0), d.get('EGT4', 0)]
+                            chts = [d.get('CHT1', 0), d.get('CHT2', 0), d.get('CHT3', 0), d.get('CHT4', 0)]
+                            egts_pos = [v for v in egts if v > 0]
+                            chts_pos = [v for v in chts if v > 0]
+                            egt_spread = max(egts_pos) - min(egts_pos) if egts_pos else 0
+                            cht_spread = max(chts_pos) - min(chts_pos) if chts_pos else 0
+                            max_egt = max(egts_pos) if egts_pos else 0
+                            now_dt = datetime.now()
+                            csv_row = ','.join(str(v) for v in [
+                                time_12, d.get('MP', 0), d.get('Oil_Temp', 0), d.get('Oil_Press', 0),
+                                d.get('Fuel_Press', 0), d.get('Volts', 0), d.get('Amps', 0),
+                                d.get('RPM', 0), d.get('Fuel_Flow', 0), d.get('Fuel_Remaining', 0),
+                                d.get('Fuel_Left', 0), d.get('Fuel_Right', 0), d.get('Carb_Temp', 0),
+                                d.get('GP2', ''), d.get('GP3', ''), d.get('Thermo', 0),
+                                d.get('EGT1', 0), d.get('EGT2', 0), d.get('EGT3', 0), d.get('EGT4', 0),
+                                d.get('CHT1', 0), d.get('CHT2', 0), d.get('CHT3', 0), d.get('CHT4', 0),
+                                now_dt.strftime('%Y-%m-%d'), time_12,
+                                state.longitude or '', state.latitude or '',
+                                state.gps_altitude or 0, state.ground_speed or 0,
+                                f"{state.bank:.2f}" if state.bank is not None else '',
+                                f"{state.pitch:.2f}" if state.pitch is not None else '',
+                                state.acc_vert or '',
+                                round(state.course) if state.course is not None else '',
+                                egt_spread, cht_spread, max_egt,
+                                percent_power if rpm > 0 else '',
+                                mode if rpm > 0 else '',
+                                deviation if rpm > 0 else '',
+                                sfc if rpm > 0 else ''
+                            ])
+                            csv_file.write(csv_row + '\n')
+                            state.csv_points += 1
+
                         # Clear warning and reset counters on successful data
                         state.last_data_time = time.time()
                         consecutive_empty = 0
@@ -1865,6 +1926,9 @@ def capture_thread_func():
         if out_file:
             out_file.flush()  # Ensure all data written before close
             out_file.close()
+        if csv_file:
+            csv_file.flush()
+            csv_file.close()
 
     state.capturing = False
 
@@ -1903,12 +1967,14 @@ def stop_capture():
 
     state.capturing = False
 
-    # Rename file with timestamp
+    timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+    csv_filename = None
+
+    # Rename stream file with timestamp
     active_path = os.path.join(CONFIG['DATA_DIR'], CONFIG['ACTIVE_FILE'])
     if os.path.exists(active_path):
         file_size = os.path.getsize(active_path)
         if file_size > 0:
-            timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
             new_name = f"stream_{timestamp}.txt"
             new_path = os.path.join(CONFIG['DATA_DIR'], new_name)
 
@@ -1921,23 +1987,42 @@ def stop_capture():
 
             os.rename(active_path, new_path)
             log(f"Capture saved: {new_name} ({file_size} bytes)")
-            return {'success': True, 'message': f'Saved as {new_name}', 'filename': new_name, 'size': file_size}
         else:
             os.remove(active_path)
-            return {'success': True, 'message': 'Empty capture removed'}
 
-    return {'success': True, 'message': 'Capture stopped'}
+    # Rename CSV file with same timestamp
+    csv_active_path = os.path.join(CONFIG['DATA_DIR'], CONFIG['ACTIVE_CSV'])
+    if os.path.exists(csv_active_path):
+        csv_size = os.path.getsize(csv_active_path)
+        if csv_size > len(CSV_HEADER) + 2:  # More than just the header
+            csv_filename = f"flight_{timestamp}.csv"
+            csv_new_path = os.path.join(CONFIG['DATA_DIR'], csv_filename)
+            counter = 1
+            while os.path.exists(csv_new_path):
+                csv_filename = f"flight_{timestamp}_{counter}.csv"
+                csv_new_path = os.path.join(CONFIG['DATA_DIR'], csv_filename)
+                counter += 1
+            os.rename(csv_active_path, csv_new_path)
+            log(f"CSV saved: {csv_filename} ({state.csv_points} points)")
+        else:
+            os.remove(csv_active_path)
+
+    result = {'success': True, 'message': 'Capture stopped'}
+    if csv_filename:
+        result['csv_filename'] = csv_filename
+        result['csv_points'] = state.csv_points
+    return result
 
 def get_files():
     """Get list of captured files, sorted by modification time (newest first)."""
-    pattern = os.path.join(CONFIG['DATA_DIR'], 'stream_*.txt')
     files = []
-    for path in glob.glob(pattern):
-        name = os.path.basename(path)
-        size = os.path.getsize(path)
-        mtime_ts = os.path.getmtime(path)
-        mtime = datetime.fromtimestamp(mtime_ts).strftime('%Y-%m-%d %H:%M')
-        files.append({'name': name, 'size': size, 'modified': mtime, 'mtime_ts': mtime_ts})
+    for pattern in ['stream_*.txt', 'flight_*.csv']:
+        for path in glob.glob(os.path.join(CONFIG['DATA_DIR'], pattern)):
+            name = os.path.basename(path)
+            size = os.path.getsize(path)
+            mtime_ts = os.path.getmtime(path)
+            mtime = datetime.fromtimestamp(mtime_ts).strftime('%Y-%m-%d %H:%M')
+            files.append({'name': name, 'size': size, 'modified': mtime, 'mtime_ts': mtime_ts})
     # Sort by modification time, newest first
     files.sort(key=lambda x: x['mtime_ts'], reverse=True)
     # Remove internal timestamp before returning
@@ -1993,6 +2078,7 @@ def get_status():
         'serial_connected': state.serial_connected,
         'stratux_connected': stratux_connected,
         'data_count': state.data_count,
+        'csv_points': state.csv_points,
         'duration': duration,
         'last_error': state.last_error,
         'data': data,
@@ -2817,24 +2903,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             border-radius: 4px;
             cursor: pointer;
         }
-        .btn-record.start {
-            background: #90EE90;
-            border-color: #006400;
-            color: #000;
-        }
-        .btn-record.stop {
-            background: #FFB6B6;
-            border-color: #CC0000;
-            color: #000;
-        }
         .btn-record.download {
             background: #87CEEB;
             border-color: #00008B;
-            color: #000;
-        }
-        .btn-record.clear {
-            background: #FFD700;
-            border-color: #CC6600;
             color: #000;
         }
         .auto-indicator {
@@ -2860,21 +2931,18 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         </div>
     </div>
 
-    <!-- CSV Recording Section -->
+    <!-- CSV Recording Section (server-side) -->
     <div class="recording-section">
         <div class="recording-indicator">
             <span id="recordDot" class="record-dot"></span>
             <span id="recordStatus">Not Recording</span>
-            <span id="autoIndicator" class="auto-indicator" style="display:none;">(Auto)</span>
         </div>
         <div class="recording-info">
             <span id="recordCount">0</span> pts
             (<span id="recordDuration">0:00</span>)
         </div>
         <div class="recording-buttons">
-            <button id="btnRecordToggle" class="btn-record start" onclick="recorder.toggle()">REC</button>
-            <button class="btn-record download" onclick="recorder.exportCSV()">CSV</button>
-            <button class="btn-record clear" onclick="recorder.clear()">CLR</button>
+            <button class="btn-record download" onclick="downloadActiveCSV()">CSV</button>
         </div>
     </div>
 
@@ -3171,6 +3239,17 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     </div>
 
     <script>
+        // Download active or most recent CSV from server
+        function downloadActiveCSV() {
+            // Try active CSV first (during capture), fall back to most recent flight CSV
+            const a = document.createElement('a');
+            a.href = '/download/' + encodeURIComponent('flight_active.csv');
+            a.download = 'flight_active.csv';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+        }
+
         // Offline tracking
         let isOffline = false;
         let statusPollId = null;
@@ -3221,278 +3300,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             });
         }
 
-        // Flight Data Recorder - Client-side CSV recording with localStorage persistence
-        const CSV_HEADER = 'Zulu_Time,MP,Oil Temp,Oil Pressure,Fuel Pressure,Volts,Amps,RPM,Fuel Flow,Gallons Remaining,Fuel Level 1,Fuel Level 2,Carb Temp,GP 2,GP 3,Thermalcouple,EGT 1,EGT 2,EGT 3,EGT 4,CHT 1,CHT 2,CHT 3,CHT 4,date,time_z,longitude,latitude,altitude_ft,speed_kts,bank,pitch,acc_vert,course,EGT Spread,CHT Spread,Max EGT,Final_Percent_Power,Operating_Condition,Percent,SFC';
-
-        class FlightDataRecorder {
-            constructor() {
-                this.MAX_POINTS = 7200;  // 2 hours at 1Hz
-                this.SAVE_INTERVAL = 5000;  // Save to localStorage every 5 seconds
-                this.AUTO_START_RPM = 500;  // Auto-start recording when RPM exceeds this
-
-                this.isRecording = false;
-                this.wasAutoStarted = false;
-                this.points = [];
-                this.sessionStart = null;
-                this.lastSaveTime = 0;
-
-                // Restore from localStorage on page load
-                this.restore();
-            }
-
-            restore() {
-                try {
-                    const saved = localStorage.getItem('flightDataRecording');
-                    if (saved) {
-                        const data = JSON.parse(saved);
-                        this.points = data.points || [];
-                        this.sessionStart = data.sessionStart;
-                        this.isRecording = data.isRecording || false;
-                        this.wasAutoStarted = data.wasAutoStarted || false;
-                        this.updateUI();
-                        console.log('Restored recording: ' + this.points.length + ' points');
-                    }
-                } catch (e) {
-                    console.error('Failed to restore recording:', e);
-                }
-            }
-
-            save() {
-                try {
-                    const data = {
-                        sessionStart: this.sessionStart,
-                        points: this.points,
-                        isRecording: this.isRecording,
-                        wasAutoStarted: this.wasAutoStarted
-                    };
-                    localStorage.setItem('flightDataRecording', JSON.stringify(data));
-                } catch (e) {
-                    console.error('Failed to save recording:', e);
-                    // If storage is full, auto-export
-                    if (e.name === 'QuotaExceededError') {
-                        alert('Storage full - auto-exporting data');
-                        this.exportCSV();
-                        this.points = [];
-                        this.sessionStart = new Date().toISOString();
-                        this.save();
-                    }
-                }
-            }
-
-            start(auto = false) {
-                if (this.isRecording) return;
-
-                this.isRecording = true;
-                this.wasAutoStarted = auto;
-                if (!this.sessionStart) {
-                    this.sessionStart = new Date().toISOString();
-                }
-                this.updateUI();
-                this.save();
-                console.log('Recording started' + (auto ? ' (auto)' : ''));
-            }
-
-            stop() {
-                if (!this.isRecording) return;
-
-                this.isRecording = false;
-                this.updateUI();
-                this.save();
-                console.log('Recording stopped: ' + this.points.length + ' points');
-            }
-
-            toggle() {
-                if (this.isRecording) {
-                    this.stop();
-                } else {
-                    this.start(false);
-                }
-            }
-
-            clear() {
-                if (this.isRecording) {
-                    this.stop();
-                }
-                this.points = [];
-                this.sessionStart = null;
-                this.wasAutoStarted = false;
-                localStorage.removeItem('flightDataRecording');
-                this.updateUI();
-                console.log('Recording cleared');
-            }
-
-            recordPoint(apiData) {
-                if (!this.isRecording) {
-                    // Auto-start if RPM > threshold
-                    const rpm = apiData.data?.RPM || 0;
-                    if (rpm > this.AUTO_START_RPM) {
-                        this.start(true);
-                    } else {
-                        return;
-                    }
-                }
-
-                const d = apiData.data || {};
-                const now = new Date();
-
-                // Format time as 12-hour with AM/PM
-                const formatTime12 = (timeStr) => {
-                    if (!timeStr) return '';
-                    const parts = timeStr.split(':');
-                    if (parts.length !== 3) return timeStr;
-                    const h = parseInt(parts[0], 10);
-                    const m = parts[1];
-                    const s = parts[2];
-                    const ampm = h >= 12 ? 'PM' : 'AM';
-                    const h12 = h % 12 || 12;
-                    return h12 + ':' + m + ':' + s + ' ' + ampm;
-                };
-
-                // Calculate spreads
-                const egts = [d.EGT1, d.EGT2, d.EGT3, d.EGT4].filter(v => v > 0);
-                const chts = [d.CHT1, d.CHT2, d.CHT3, d.CHT4].filter(v => v > 0);
-                const egtSpread = egts.length > 0 ? Math.max(...egts) - Math.min(...egts) : 0;
-                const chtSpread = chts.length > 0 ? Math.max(...chts) - Math.min(...chts) : 0;
-                const maxEgt = egts.length > 0 ? Math.max(...egts) : 0;
-
-                // Build CSV row data
-                const point = {
-                    zulu_time: formatTime12(d.time),
-                    mp: d.MP || 0,
-                    oil_temp: d.Oil_Temp || 0,
-                    oil_press: d.Oil_Press || 0,
-                    fuel_press: d.Fuel_Press || 0,
-                    volts: d.Volts || 0,
-                    amps: d.Amps || 0,
-                    rpm: d.RPM || 0,
-                    fuel_flow: d.Fuel_Flow || 0,
-                    gallons_rem: d.Fuel_Remaining || 0,
-                    fuel_l1: d.Fuel_Left || 0,
-                    fuel_l2: d.Fuel_Right || 0,
-                    carb_temp: d.Carb_Temp || 0,
-                    gp2: d.GP2 || '',
-                    gp3: d.GP3 || '',
-                    thermo: d.Thermo || 0,
-                    egt1: d.EGT1 || 0,
-                    egt2: d.EGT2 || 0,
-                    egt3: d.EGT3 || 0,
-                    egt4: d.EGT4 || 0,
-                    cht1: d.CHT1 || 0,
-                    cht2: d.CHT2 || 0,
-                    cht3: d.CHT3 || 0,
-                    cht4: d.CHT4 || 0,
-                    date: now.toISOString().split('T')[0],
-                    time_z: formatTime12(d.time),
-                    longitude: apiData.longitude || '',
-                    latitude: apiData.latitude || '',
-                    altitude_ft: apiData.gps_altitude || 0,
-                    speed_kts: apiData.ground_speed || 0,
-                    bank: apiData.bank !== null && apiData.bank !== undefined ? apiData.bank.toFixed(2) : '',
-                    pitch: apiData.pitch !== null && apiData.pitch !== undefined ? apiData.pitch.toFixed(2) : '',
-                    acc_vert: apiData.acc_vert || '',
-                    course: apiData.course !== null && apiData.course !== undefined ? Math.round(apiData.course) : '',
-                    egt_spread: egtSpread,
-                    cht_spread: chtSpread,
-                    max_egt: maxEgt,
-                    percent_power: (d.RPM > 0) ? (apiData.percent_power || '') : '',
-                    operating_condition: (d.RPM > 0) ? (apiData.rop_lop_mode || '') : '',
-                    rop_lop_percent: (d.RPM > 0) ? (apiData.rop_lop_percent || '') : '',
-                    sfc: (d.RPM > 0) ? (apiData.sfc || '') : ''
-                };
-
-                this.points.push(point);
-
-                // Auto-export if capacity reached
-                if (this.points.length >= this.MAX_POINTS) {
-                    console.log('Max capacity reached, auto-exporting...');
-                    this.exportCSV();
-                    this.points = [];
-                    this.sessionStart = new Date().toISOString();
-                }
-
-                // Periodic save to localStorage
-                const now_ms = Date.now();
-                if (now_ms - this.lastSaveTime > this.SAVE_INTERVAL) {
-                    this.save();
-                    this.lastSaveTime = now_ms;
-                }
-
-                this.updateUI();
-            }
-
-            exportCSV() {
-                if (this.points.length === 0) {
-                    alert('No data to export');
-                    return;
-                }
-
-                // Build CSV content
-                let csv = CSV_HEADER + '\\n';
-                for (const p of this.points) {
-                    const row = [
-                        p.zulu_time, p.mp, p.oil_temp, p.oil_press, p.fuel_press,
-                        p.volts, p.amps, p.rpm, p.fuel_flow, p.gallons_rem,
-                        p.fuel_l1, p.fuel_l2, p.carb_temp, p.gp2, p.gp3, p.thermo,
-                        p.egt1, p.egt2, p.egt3, p.egt4, p.cht1, p.cht2, p.cht3, p.cht4,
-                        p.date, p.time_z, p.longitude, p.latitude, p.altitude_ft,
-                        p.speed_kts, p.bank, p.pitch, p.acc_vert, p.course,
-                        p.egt_spread, p.cht_spread, p.max_egt, p.percent_power,
-                        p.operating_condition, p.rop_lop_percent, p.sfc
-                    ].join(',');
-                    csv += row + '\\n';
-                }
-
-                // Generate filename from session start
-                const startDate = new Date(this.sessionStart);
-                const filename = 'flight_' + startDate.toISOString().replace(/[:.]/g, '-').slice(0, 19) + '.csv';
-
-                // Download
-                const blob = new Blob([csv], { type: 'text/csv' });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = filename;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
-
-                console.log('Exported ' + this.points.length + ' points to ' + filename);
-            }
-
-            updateUI() {
-                const dot = document.getElementById('recordDot');
-                const status = document.getElementById('recordStatus');
-                const auto = document.getElementById('autoIndicator');
-                const count = document.getElementById('recordCount');
-                const duration = document.getElementById('recordDuration');
-                const btn = document.getElementById('btnRecordToggle');
-
-                if (dot) dot.className = 'record-dot' + (this.isRecording ? ' recording' : '');
-                if (status) status.textContent = this.isRecording ? 'Recording' : 'Not Recording';
-                if (auto) auto.style.display = (this.isRecording && this.wasAutoStarted) ? 'inline' : 'none';
-                if (count) count.textContent = this.points.length;
-
-                // Calculate duration
-                if (duration && this.sessionStart && this.points.length > 0) {
-                    const secs = this.points.length; // 1 point per second
-                    const mins = Math.floor(secs / 60);
-                    const remSecs = secs % 60;
-                    duration.textContent = mins + ':' + String(remSecs).padStart(2, '0');
-                } else if (duration) {
-                    duration.textContent = '0:00';
-                }
-
-                // Update button
-                if (btn) {
-                    btn.textContent = this.isRecording ? 'STOP' : 'REC';
-                    btn.className = 'btn-record ' + (this.isRecording ? 'stop' : 'start');
-                }
-            }
-        }
-
-        // Global recorder instance
-        const recorder = new FlightDataRecorder();
+        // Flight Data Recording is now server-side (in capture thread)
 
         // Trend calculation: compare current value to value from 3 seconds ago
         // Optimized from actual flight data analysis for mag check detection
@@ -3548,8 +3356,15 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             fetch('/api/status')
                 .then(r => r.json())
                 .then(data => {
-                    // Record data point for CSV export
-                    recorder.recordPoint(data);
+                    // Update server-side CSV recording display
+                    const dot = document.getElementById('recordDot');
+                    const recStatus = document.getElementById('recordStatus');
+                    const recCount = document.getElementById('recordCount');
+                    const recDuration = document.getElementById('recordDuration');
+                    if (dot) dot.className = 'record-dot' + (data.capturing ? ' recording' : '');
+                    if (recStatus) recStatus.textContent = data.capturing ? 'Recording CSV' : 'Not Recording';
+                    if (recCount) recCount.textContent = data.csv_points || 0;
+                    if (recDuration) recDuration.textContent = data.duration || '0:00';
 
                     const statusEl = document.getElementById('status');
                     const btnStart = document.getElementById('btnStart');
@@ -3779,10 +3594,23 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 });
         }
 
+        function triggerDownload(filename) {
+            const a = document.createElement('a');
+            a.href = '/download/' + encodeURIComponent(filename);
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+        }
+
         function stopCapture() {
             fetch('/api/stop', {method: 'POST'})
                 .then(r => r.json())
                 .then(data => {
+                    // Auto-download the CSV
+                    if (data.csv_filename) {
+                        triggerDownload(data.csv_filename);
+                    }
                     alert(data.message);
                     updateStatus();
                     updateFiles();
@@ -3791,7 +3619,20 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         function shutdownApp() {
             if (confirm('Shutdown the Engine Monitor app?\\n\\nYou will need to restart it manually or reboot the Raspberry Pi.')) {
-                fetch('/api/shutdown', {method: 'POST'})
+                // Stop capture first to save and download CSV, then shutdown
+                fetch('/api/stop', {method: 'POST'})
+                    .then(r => r.json())
+                    .then(data => {
+                        if (data.csv_filename) {
+                            triggerDownload(data.csv_filename);
+                        }
+                        // Brief delay to allow download to start
+                        return new Promise(resolve => setTimeout(resolve, 500));
+                    })
+                    .catch(() => {})  // Ignore if not capturing
+                    .then(() => {
+                        return fetch('/api/shutdown', {method: 'POST'});
+                    })
                     .then(r => r.json())
                     .then(data => {
                         alert(data.message);
@@ -3860,13 +3701,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         });
 
         function downloadFile(name) {
-            // Use hidden anchor to download without navigating away
-            const a = document.createElement('a');
-            a.href = '/download/' + encodeURIComponent(name);
-            a.download = name;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
+            triggerDownload(name);
         }
 
         // File upload handling - wrap in DOMContentLoaded to ensure element exists
@@ -4318,10 +4153,12 @@ class RequestHandler(BaseHTTPRequestHandler):
         elif path.startswith('/download/'):
             filename = path[10:]  # Remove '/download/'
             filepath = os.path.join(CONFIG['DATA_DIR'], filename)
-            if os.path.exists(filepath) and filename.startswith('stream_'):
+            allowed = filename.startswith('stream_') or filename.startswith('flight_')
+            if os.path.exists(filepath) and allowed:
                 try:
+                    content_type = 'text/csv' if filename.endswith('.csv') else 'text/plain'
                     self.send_response(200)
-                    self.send_header('Content-Type', 'text/plain')
+                    self.send_header('Content-Type', content_type)
                     self.send_header('Content-Disposition', f'attachment; filename="{filename}"')
                     self.send_header('Content-Length', os.path.getsize(filepath))
                     self.end_headers()
@@ -4398,6 +4235,9 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/javascript')
                 self.send_header('Content-Length', len(content))
+                # Safari needs no-cache so it always checks for SW updates
+                self.send_header('Cache-Control', 'no-cache')
+                self.send_header('Service-Worker-Allowed', '/')
                 self.end_headers()
                 self.wfile.write(content)
             except FileNotFoundError:

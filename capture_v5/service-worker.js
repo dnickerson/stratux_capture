@@ -3,12 +3,11 @@
  * Provides offline caching for the engine monitor and fuel planner
  */
 
-const CACHE_NAME = 'stratux-app-v1';
+const CACHE_NAME = 'stratux-app-v2';
 
 // Core files required for offline operation
 const CORE_ASSETS = [
     './',
-    './index.html',
     './fuel-planner.html',
     './fuel-planner.js',
     './fuel-planner.css',
@@ -18,24 +17,48 @@ const CORE_ASSETS = [
     './help'
 ];
 
-// Install event - cache core assets
+// Offline fallback page shown when cache is empty and server is unreachable
+const OFFLINE_PAGE = `<!DOCTYPE html>
+<html><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Offline</title>
+<style>
+body { font-family: -apple-system, sans-serif; display: flex; align-items: center;
+  justify-content: center; min-height: 100vh; margin: 0; background: #FFFFF0;
+  color: #333; text-align: center; padding: 20px; }
+.box { max-width: 400px; }
+h1 { color: #006400; font-size: 1.4em; }
+p { line-height: 1.5; }
+button { background: #006400; color: white; border: none; padding: 12px 24px;
+  border-radius: 6px; font-size: 1em; margin-top: 12px; cursor: pointer; }
+</style></head>
+<body><div class="box">
+<h1>Not Connected</h1>
+<p>Connect to the Stratux WiFi network and try again.</p>
+<p>If you previously loaded this page while connected, it should be available offline. Try closing and reopening the app.</p>
+<button onclick="location.reload()">Retry</button>
+</div></body></html>`;
+
+// Install event - cache core assets individually (not all-or-nothing)
 self.addEventListener('install', event => {
     event.waitUntil(
         caches.open(CACHE_NAME)
             .then(cache => {
-                // Cache core assets - fail if any are missing
-                return cache.addAll(CORE_ASSETS);
+                // Cache each asset individually so one failure doesn't prevent others
+                return Promise.all(
+                    CORE_ASSETS.map(url =>
+                        cache.add(url).catch(err => {
+                            console.warn('Failed to cache:', url, err);
+                        })
+                    )
+                );
             })
             .then(() => self.skipWaiting())
-            .catch(err => {
-                console.error('Service worker install failed:', err);
-                // Still skip waiting so we can try again
-                return self.skipWaiting();
-            })
     );
 });
 
-// Activate event - clean up old caches and claim clients
+// Activate event - clean up old caches and claim clients immediately
 self.addEventListener('activate', event => {
     event.waitUntil(
         caches.keys()
@@ -60,7 +83,6 @@ self.addEventListener('fetch', event => {
         event.respondWith(
             fetch(event.request)
                 .then(response => {
-                    // Cache successful API responses
                     if (response.ok) {
                         const clone = response.clone();
                         caches.open(CACHE_NAME).then(cache => {
@@ -70,25 +92,19 @@ self.addEventListener('fetch', event => {
                     return response;
                 })
                 .catch(() => {
-                    // Return cached API response if available
                     return caches.match(event.request);
                 })
         );
         return;
     }
 
-    // Cache-first for static assets
+    // Cache-first for static assets, with network fallback and background update
     event.respondWith(
-        caches.match(event.request)
+        caches.match(event.request, { ignoreVary: true })
             .then(cachedResponse => {
-                if (cachedResponse) {
-                    return cachedResponse;
-                }
-
-                // Not in cache, try network
-                return fetch(event.request)
+                // Start network fetch in background to update cache
+                const networkFetch = fetch(event.request)
                     .then(networkResponse => {
-                        // Cache successful responses
                         if (networkResponse.ok) {
                             const clone = networkResponse.clone();
                             caches.open(CACHE_NAME).then(cache => {
@@ -97,18 +113,34 @@ self.addEventListener('fetch', event => {
                         }
                         return networkResponse;
                     })
-                    .catch(() => {
-                        // Offline and not cached - return cached version of the requested page
-                        if (event.request.mode === 'navigate') {
-                            // Try to match the specific page, fall back to root
-                            if (url.pathname.includes('fuel-planner')) {
-                                return caches.match('./fuel-planner.html');
-                            }
-                            return caches.match('./');
+                    .catch(() => null);
+
+                if (cachedResponse) {
+                    return cachedResponse;
+                }
+
+                // Not in cache - wait for network
+                return networkFetch.then(networkResponse => {
+                    if (networkResponse) {
+                        return networkResponse;
+                    }
+
+                    // Both cache and network failed
+                    if (event.request.mode === 'navigate') {
+                        // Try fallback matches for navigation requests
+                        if (url.pathname.includes('fuel-planner')) {
+                            return caches.match('./fuel-planner.html')
+                                .then(r => r || new Response(OFFLINE_PAGE, {
+                                    headers: { 'Content-Type': 'text/html' }
+                                }));
                         }
-                        // Return empty response for other requests
-                        return new Response('', { status: 503, statusText: 'Offline' });
-                    });
+                        return caches.match('./')
+                            .then(r => r || new Response(OFFLINE_PAGE, {
+                                headers: { 'Content-Type': 'text/html' }
+                            }));
+                    }
+                    return new Response('', { status: 503, statusText: 'Offline' });
+                });
             })
     );
 });
