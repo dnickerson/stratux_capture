@@ -42,6 +42,9 @@ class ReadyStep {
             this.filedPlan = saved.filedPlan || null;
         }
 
+        // Pre-fill from previous steps
+        this._prefill(workflowData);
+
         // Load saved pilot info from meta
         if (!this.pilotName) {
             const pilotInfo = await this.db.getMeta('pilot_info');
@@ -54,25 +57,68 @@ class ReadyStep {
         this._render();
     }
 
+    /**
+     * Pre-fill filing form fields from previous step data.
+     */
+    _prefill(wd) {
+        // Departure time from route step (convert local datetime to UTC HHMM)
+        if (!this.departureTime && wd.route?.departureTime) {
+            const dt = new Date(wd.route.departureTime);
+            if (!isNaN(dt)) {
+                const hh = String(dt.getUTCHours()).padStart(2, '0');
+                const mm = String(dt.getUTCMinutes()).padStart(2, '0');
+                this.departureTime = hh + mm;
+            }
+        }
+    }
+
     _render() {
         if (!this.container) return;
 
         const wd = this.controller.workflowData;
         const checklist = this._buildChecklist(wd);
         const pob = wd.aircraft?.loading?.total_pax || 1;
+        const route = wd.route || {};
+        const ac = wd.aircraft || {};
+        const acProfile = ac.aircraft || {};
+        const wb = wd.wb || {};
+        const eteStr = route.totalEte
+            ? `${Math.floor(route.totalEte / 60)}:${String(Math.round(route.totalEte % 60)).padStart(2, '0')}`
+            : '—';
+        const fuelOnBoard = ac.loading?.fuel_gal || 0;
+        const reserve = fuelOnBoard - (route.totalFuel || 0);
+        const burnRate = acProfile.fuel_burn_gph || 7;
+        const reserveMin = reserve > 0 ? (reserve / burnRate) * 60 : 0;
 
         this.container.innerHTML = `
+            <!-- Flight Summary (read-only from previous steps) -->
+            <div class="card" style="padding:8px 12px;">
+                <div class="flex items-center gap-md" style="flex-wrap:wrap;">
+                    <strong>${acProfile.tail_number || '?'}</strong>
+                    <span class="font-mono">${route.departure || '?'} → ${route.route?.slice(1, -1).join(' ') || ''} → ${route.destination || '?'}</span>
+                    <span class="text-muted">|</span>
+                    <span class="font-mono">${route.altitude ? route.altitude.toLocaleString() + 'ft' : '—'}</span>
+                    <span class="text-muted">|</span>
+                    <span class="font-mono">${route.totalDist || '—'}nm</span>
+                    <span class="text-muted">|</span>
+                    <span class="font-mono">ETE ${eteStr}</span>
+                    <span class="text-muted">|</span>
+                    <span class="font-mono">Fuel ${(route.totalFuel || 0).toFixed(1)}/${fuelOnBoard.toFixed(1)}gal</span>
+                    <span class="text-muted">|</span>
+                    <span class="font-mono" style="${reserveMin < 45 ? 'color:var(--color-warning);font-weight:600;' : ''}">Rsv ${reserve.toFixed(1)}gal (${Math.round(reserveMin)}min)</span>
+                    ${wb.takeoff_weight ? `<span class="text-muted">|</span><span class="font-mono">${wb.takeoff_weight}lb ${wb.in_envelope ? 'IN ENV' : '<span style="color:var(--color-danger);">OUT OF ENV</span>'}</span>` : ''}
+                </div>
+            </div>
+
             <!-- Pre-Flight Checklist -->
-            <div class="card">
-                <div class="card-title">Pre-Flight Checklist</div>
-                <div class="ready-checklist">
+            <div class="card" style="padding:8px 12px;">
+                <div class="flex items-center gap-md" style="flex-wrap:wrap;">
                     ${checklist.map(item => `
-                        <div class="ready-checklist-item ${item.ok ? 'ok' : 'missing'}">
-                            <span class="check-icon">${item.ok ? '&#x2713;' : '&#x2717;'}</span>
-                            <span>${item.label}</span>
-                            ${item.detail ? `<span class="text-sm text-muted" style="margin-left:auto;">${item.detail}</span>` : ''}
-                        </div>
-                    `).join('')}
+                        <span style="color:${item.ok ? 'var(--color-success,green)' : 'var(--color-danger,red)'};">
+                            ${item.ok ? '&#x2713;' : '&#x2717;'} ${item.label}
+                            ${item.detail ? `<span class="text-sm text-muted">(${item.detail})</span>` : ''}
+                        </span>
+                    `).join('<span class="text-muted">|</span>')}
                 </div>
             </div>
 
@@ -95,7 +141,26 @@ class ReadyStep {
                     </div>
                 ` : ''}
 
-                <div class="filing-form">
+                <!-- Pre-filled read-only fields from route -->
+                <div class="filing-form" style="gap:6px;">
+                    <div class="flex items-center gap-sm" style="grid-column:1/-1;background:var(--bg-surface);padding:6px 10px;border-radius:4px;">
+                        <span class="text-sm text-muted" style="min-width:100px;">Aircraft</span>
+                        <span class="font-mono">${acProfile.type_code || '?'} / ${acProfile.tail_number || '?'} — TAS ${acProfile.cruise_tas || '?'}kt</span>
+                    </div>
+                    <div class="flex items-center gap-sm" style="grid-column:1/-1;background:var(--bg-surface);padding:6px 10px;border-radius:4px;">
+                        <span class="text-sm text-muted" style="min-width:100px;">Route</span>
+                        <span class="font-mono">${route.departure || '?'} ${route.route?.slice(1, -1).join(' ') || 'DCT'} ${route.destination || '?'}</span>
+                    </div>
+                    <div class="flex items-center gap-sm" style="grid-column:1/-1;background:var(--bg-surface);padding:6px 10px;border-radius:4px;">
+                        <span class="text-sm text-muted" style="min-width:100px;">Altitude</span>
+                        <span class="font-mono">${route.altitude ? route.altitude.toLocaleString() + ' ft' : '—'}</span>
+                        <span class="text-muted" style="margin-left:24px;">ETE</span>
+                        <span class="font-mono">${eteStr}</span>
+                        <span class="text-muted" style="margin-left:24px;">Fuel endurance</span>
+                        <span class="font-mono">${fuelOnBoard > 0 && burnRate > 0 ? `${Math.floor(fuelOnBoard/burnRate)}:${String(Math.round((fuelOnBoard/burnRate % 1)*60)).padStart(2,'0')}` : '—'}</span>
+                    </div>
+
+                    <!-- Editable filing fields -->
                     <div>
                         <label class="input-label">Flight Rules</label>
                         <div class="toggle-group">
@@ -104,7 +169,7 @@ class ReadyStep {
                         </div>
                     </div>
                     <div>
-                        <label class="input-label">Proposed Departure (UTC)</label>
+                        <label class="input-label">Departure (UTC)</label>
                         <input type="text" class="input departure-time-input"
                             value="${this.departureTime}" placeholder="HHMM (e.g., 1430)"
                             maxlength="4" inputmode="numeric">
@@ -121,7 +186,7 @@ class ReadyStep {
                         <label class="input-label">Alternate Airport</label>
                         <input type="text" class="input alternate-input"
                             value="${this.alternate}" placeholder="ICAO (optional)"
-                            maxlength="4" style="text-transform:uppercase;">
+                            maxlength="5" style="text-transform:uppercase;">
                     </div>
                     <div>
                         <label class="input-label">People on Board</label>
@@ -147,7 +212,7 @@ class ReadyStep {
 
                 ${!this.filedPlan ? `
                     <button class="btn btn-primary file-btn mt-md w-full" ${this.filing ? 'disabled' : ''}>
-                        ${this.filing ? '<span class="spinner"></span> Filing...' : 'File Flight Plan'}
+                        ${this.filing ? '<span class="spinner"></span> Filing...' : 'File Flight Plan via 1800wxbrief'}
                     </button>
                 ` : ''}
             </div>
@@ -167,12 +232,6 @@ class ReadyStep {
                         <div class="progress-bar-fill" style="width:${this.uploadProgress}%;"></div>
                     </div>
                 ` : ''}
-            </div>
-
-            <!-- Route Summary -->
-            <div class="card">
-                <div class="card-title">Flight Summary</div>
-                ${this._renderSummary(wd)}
             </div>
         `;
 
