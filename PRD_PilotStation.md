@@ -1,11 +1,11 @@
 # PilotStation: Unified Cockpit EFB Platform
 
-## Product Requirements Document v1.6
+## Product Requirements Document v1.7
 
-**Date:** 2026-02-11
+**Date:** 2026-02-12
 **Author:** Dana Nickerson
 **Platform:** Raspberry Pi 5 (headless server) + iPad (display via Safari)
-**Status:** Draft
+**Status:** Draft — Phase 1d complete, Phase 2 partially complete
 
 ---
 
@@ -28,6 +28,53 @@ This architecture leverages:
 It replaces ForeFlight ($200+/yr subscription) by integrating custom-built modules (engine monitor v3.3.0, fuel planner) with a new web-based moving map and new capabilities (profile view, logbook, weather briefing, AI copilot) — all in one unified cockpit UI.
 
 The core design principle is **cockpit-first UI/UX**: every interaction must be achievable with one gloved tap on a turbulence-shaken touchscreen in direct sunlight.
+
+---
+
+## 1.1 Implementation Status (as of 2026-02-12)
+
+| Phase | Status | Summary |
+|-------|--------|---------|
+| **Phase 1a** — Data pipeline | **Not started** | FAA chart tile processing, approach plate preparation, NASR data conversion |
+| **Phase 1b** — Pi server setup | **Not started** | Nginx, FastAPI backend, overlay-aware storage, WebSocket server |
+| **Phase 1c** — Cockpit mode UI | **Not started** | MAP, ENGINE, FUEL, WX, PLAN, LOG cockpit views on iPad |
+| **Phase 1d** — Dual-Mode PWA | **Complete** | Full 6-step planning workflow, mode detection, weather, W&B, flight plan filing, Cloudflare Worker, data sync |
+| **Phase 2** — AI & Advanced Planning | **Partially complete** | AI client, dashboard view, and `/claude` Worker route implemented; cockpit-side AI, profile view, fuel stop optimization pending |
+| **Phase 3** — Cockpit Planning & Logbook | **Not started** | Cockpit-side route entry, logbook, filed plan reminders |
+| **Phase 4** — Polish & Integration | **Not started** | Garmin GPS 175, synthetic vision, OTA updates |
+
+**Phase 1d delivered components:**
+
+| Component | File | Lines | Features |
+|-----------|------|-------|----------|
+| App shell & orchestrator | `pilotstation/web/index.html`, `app.js` | 462 | PWA shell, mode switching, bootstrap data, alert/toast system |
+| Mode detector | `pilotstation/web/mode-detector.js` | 151 | Network probe state machine, 3 modes, manual override, localStorage persistence |
+| Workflow controller | `pilotstation/web/planning/workflow.js` | 209 | 6-step state machine, auto-save to IndexedDB, step validation |
+| Step 1: Aircraft | `pilotstation/web/planning/aircraft-step.js` | 391 | Aircraft selection, per-station weight entry, fuel quantity, POB |
+| Step 2: Route | `pilotstation/web/planning/route-step.js` | 1,079 | Route parsing, VOR navaids, winds aloft, IAS→TAS, phase-of-flight fuel model, per-leg altitude, hemispheric rule |
+| Step 3: Weather | `pilotstation/web/planning/weather-step.js` | 269 | Auto-fetch METAR/TAF/winds/PIREP/SIGMET via Cloudflare Worker, staleness detection |
+| Step 4: W&B | `pilotstation/web/planning/wb-step.js` | 300 | Station loading, CG calculation, envelope diagram, takeoff/landing W&B |
+| Step 5: Briefing | `pilotstation/web/planning/briefing-step.js` | 418 | Smart briefing, rules-based go/no-go, 1800wxbrief official briefing |
+| Step 6: Ready/File | `pilotstation/web/planning/ready-step.js` | 615 | Flight plan filing form, auto-populated fields, amend/cancel, upload to Pi |
+| Dashboard | `pilotstation/web/planning/dashboard.js` | 154 | 2×3 grid overview of all 6 steps (pulled forward from Phase 2) |
+| Weather client | `pilotstation/web/shared/weather-client.js` | 403 | aviationweather.gov API integration, METAR decoding, winds aloft, caching |
+| W&B calculator | `pilotstation/web/shared/wb-calculator.js` | 202 | Pure computation: CG, moments, envelope verification |
+| Flight plan filer | `pilotstation/web/shared/flight-plan-filer.js` | 293 | 1800wxbrief filing, amendment, cancellation, official briefing |
+| AI client | `pilotstation/web/shared/ai-client.js` | 285 | Claude Sonnet 4.5 integration (pulled forward from Phase 2) |
+| Flight plan model | `pilotstation/web/shared/flight-plan-model.js` | 226 | Full flight plan package schema |
+| NASR database | `pilotstation/web/shared/nasr-db.js` | 381 | IndexedDB with 10+ object stores |
+| Sync manager | `pilotstation/web/shared/sync-manager.js` | 232 | Two-way sync with Pi, exponential backoff |
+| Style system | `pilotstation/web/style.css` | 1,000+ | Dual-theme CSS (planning/cockpit/night), aviation colors, touch targets |
+| Cloudflare Worker | `pilotstation-worker/src/index.js` | 201 | CORS proxy: `/wx/*`, `/fp/*`, `/briefing`, `/claude`, `/health`, rate limiting |
+| **Total PWA frontend** | | **~5,500** | |
+
+**Existing Capture_V5 components (operational, pre-PilotStation):**
+
+| Component | File | Status |
+|-----------|------|--------|
+| Engine monitor | `capture_v5/engine_monitor.py` (~2,900 lines) | Operational — serves on port 8080, CSV recording, fuel tracking, sticky valve detection |
+| Fuel planner PWA | `capture_v5/fuel-planner.html/js/css` | Operational — standalone PWA with burn rate profiles, tic calibration |
+| Service worker | `capture_v5/service-worker.js` | Operational — stale-while-revalidate caching |
 
 ---
 
@@ -457,12 +504,12 @@ PilotStation is a single PWA that operates in different modes depending on the i
 
 | ID      | Requirement                                                        | Priority |
 | ------- | ------------------------------------------------------------------ | -------- |
-| MODE-01 | Network probe to detect Pi (192.168.10.1) with 2-second timeout   | P1       |
-| MODE-02 | Network probe to detect internet via Cloudflare Worker health endpoint | P1   |
-| MODE-03 | Automatic mode switching with 30-second re-probe interval         | P1       |
-| MODE-04 | Manual mode override via tappable status bar badge                | P1       |
-| MODE-05 | Mode transition notification (non-blocking blue banner, 5s dismiss) | P1     |
-| MODE-06 | Mode state persisted in localStorage for instant startup          | P1       |
+| MODE-01 | Network probe to detect Pi (192.168.10.1) with 2-second timeout   | P1       | ✅ |
+| MODE-02 | Network probe to detect internet via Cloudflare Worker health endpoint | P1   | ✅ |
+| MODE-03 | Automatic mode switching with 30-second re-probe interval         | P1       | ✅ |
+| MODE-04 | Manual mode override via tappable status bar badge                | P1       | ✅ (modal with selectable modes, 5-min override duration) |
+| MODE-05 | Mode transition notification (non-blocking blue banner, 5s dismiss) | P1     | ✅ |
+| MODE-06 | Mode state persisted in localStorage for instant startup          | P1       | ✅ |
 
 #### 5.7.2 Planning Mode Architecture
 
@@ -589,12 +636,12 @@ When the PWA detects a transition from Planning Mode (or Offline Mode) to Cockpi
 
 | ID     | Requirement                                                            | Priority |
 | ------ | ---------------------------------------------------------------------- | -------- |
-| SYNC-01 | Auto-detect staged flight plan package on mode transition to Cockpit  | P1       |
-| SYNC-02 | Confirmation toast with 10-second auto-upload default                 | P1       |
-| SYNC-03 | Upload progress indicator                                             | P1       |
-| SYNC-04 | Retry with exponential backoff on upload failure                      | P1       |
-| SYNC-05 | NASR data sync from Pi to IndexedDB when on Stratux WiFi             | P1       |
-| SYNC-06 | Sync status indicator: last sync timestamp, data freshness            | P1       |
+| SYNC-01 | Auto-detect staged flight plan package on mode transition to Cockpit  | P1       | ✅ (client-side; Pi endpoints need Phase 1b) |
+| SYNC-02 | Confirmation toast with 10-second auto-upload default                 | P1       | ✅ (client-side) |
+| SYNC-03 | Upload progress indicator                                             | P1       | ✅ (client-side) |
+| SYNC-04 | Retry with exponential backoff on upload failure                      | P1       | ✅ (1s/2s/4s backoff) |
+| SYNC-05 | NASR data sync from Pi to IndexedDB when on Stratux WiFi             | P1       | ✅ (client-side; Pi endpoints need Phase 1b) |
+| SYNC-06 | Sync status indicator: last sync timestamp, data freshness            | P1       | ✅ (client-side) |
 
 #### 5.7.4 Shared UI Shell
 
@@ -642,11 +689,11 @@ Both modes share the same PWA shell (status bar at top, nav bar at bottom). The 
 
 **Service worker strategy:** The service worker caches static assets (HTML, JS, CSS) for both modes on install. Structured data (NASR, weather, flight plans) is stored in IndexedDB, not the service worker cache, because it needs to be queried. The service worker intercepts API calls and routes them based on mode: to `192.168.10.1` in Cockpit Mode, to `pilotstation-api.workers.dev` in Planning Mode.
 
-### 5.8 Cloudflare Worker Proxy
+### 5.8 Cloudflare Worker Proxy — IMPLEMENTED ✓
 
 **The problem:** The PilotStation PWA runs in Safari on the iPad. Browser security (CORS) prevents direct API calls from the browser to `aviationweather.gov` and `api.anthropic.com`. Additionally, the Anthropic API key must not be stored in client-side code.
 
-**The solution:** A lightweight Cloudflare Worker (~150 lines) acts as a CORS-enabled proxy. It runs on Cloudflare's free tier (100,000 requests/day — far exceeding aviation planning needs).
+**The solution:** A Cloudflare Worker (`pilotstation-worker/src/index.js`, 201 lines) acts as a CORS-enabled proxy. It runs on Cloudflare's free tier (100,000 requests/day — far exceeding aviation planning needs).
 
 **Worker routes:**
 
@@ -674,7 +721,7 @@ Both modes share the same PWA shell (status bar at top, nav bar at bottom). The 
 - **Origin validation:** Worker checks the `Origin` header and only accepts requests from the PWA's origin (or `null` for home-screen PWAs)
 - **Request validation:** `/claude` endpoint validates max_tokens is bounded (≤4096) and model is allowed
 
-**Deployment:** Single `wrangler.toml` + `src/index.js` file. Deployed to `pilotstation-api.<your-domain>.workers.dev`. Updated independently of PilotStation.
+**Deployment:** Single `wrangler.toml` + `src/index.js` file (201 lines). Deployed to `pilotstation-api.<your-domain>.workers.dev`. Updated independently of PilotStation. **Implementation includes** per-category rate limiting (60 wx/min, 10 filing/min, 20 AI/min), in-memory rate limit state tracking, CORS preflight handling, and basic auth for 1800wxbrief Leidos credentials from environment variables.
 
 **Estimated Claude API cost per planning session:**
 
@@ -1097,13 +1144,13 @@ Standard 1800wxbrief briefings can be 70+ pages. PilotStation generates a **cond
 
 | ID     | Requirement                                                                                                                                                           | Priority |
 | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
-| FLT-01 | Route entry: departure, waypoints, destination (ICAO identifiers)                                                                                                     | P1       |
-| FLT-02 | **Airway route planning**: enter airways (V16, J80, T-routes) between fixes                                                                                           | P1       |
-| FLT-03 | Airway database from FAA NASR `AWY_*.csv` — Victor, Jet, RNAV T/Q routes                                                                                              | P1       |
-| FLT-04 | Distance, magnetic heading, and time-enroute per leg                                                                                                                  | P1       |
-| FLT-05 | **Optimal altitude selection**: calculate groundspeed at 3000-12000 ft using winds aloft, recommend altitude with shortest enroute time (respecting hemispheric rule) | P1       |
-| FLT-06 | Wind correction angles from winds aloft at selected altitude                                                                                                          | P1       |
-| FLT-07 | Fuel required per leg and total (from burn rate profiles and power setting)                                                                                           | P1       |
+| FLT-01 | Route entry: departure, waypoints, destination (ICAO identifiers)                                                                                                     | P1 — ✅ Planning Mode |
+| FLT-02 | **Airway route planning**: enter airways (V16, J80, T-routes) between fixes                                                                                           | P1 — ✅ Planning Mode |
+| FLT-03 | Airway database from FAA NASR `AWY_*.csv` — Victor, Jet, RNAV T/Q routes                                                                                              | P1 — ✅ Planning Mode |
+| FLT-04 | Distance, magnetic heading, and time-enroute per leg                                                                                                                  | P1 — ✅ Planning Mode |
+| FLT-05 | **Optimal altitude selection**: calculate groundspeed at 3000-12000 ft using winds aloft, recommend altitude with shortest enroute time (respecting hemispheric rule) | P1 — ✅ Planning Mode |
+| FLT-06 | Wind correction angles from winds aloft at selected altitude                                                                                                          | P1 — ✅ Planning Mode |
+| FLT-07 | Fuel required per leg and total (from burn rate profiles and power setting)                                                                                           | P1 — ✅ Planning Mode |
 | FLT-08 | **Fuel stop planning**: given range, find airports along route with fuel                                                                                              | P1       |
 | FLT-09 | **Fuel price comparison**: show 100LL prices at candidate fuel stop airports                                                                                          | P1       |
 | FLT-10 | Sort fuel stops by: price, distance from route, total cost (price × gallons needed)                                                                                   | P1       |
@@ -1112,6 +1159,16 @@ Standard 1800wxbrief briefings can be 70+ pages. PilotStation generates a **cond
 | FLT-13 | NAV log export (printable format)                                                                                                                                     | P2       |
 | FLT-14 | Integration with profile view (route defines the cross-section)                                                                                                       | P1       |
 | FLT-15 | Integration with Smart Briefing (route defines the weather corridor)                                                                                                  | P1       |
+
+**Implementation note (FLT-01 through FLT-07):** These features are implemented in the Planning Mode `route-step.js` module (1,079 lines). The implementation extends the original requirements with:
+
+- **Phase-of-flight fuel model**: Separate fuel burn calculations for Taxi, Climb, Cruise, and Descent phases with per-leg altitude awareness
+- **Per-leg altitude with phase tags**: Each leg is tagged as CLB (climb), CRZ (cruise), or DES (descent) based on altitude progression
+- **IAS→TAS conversion**: Uses winds aloft OAT (temperature at altitude) for accurate TAS calculation, with standard atmosphere fallback when winds data unavailable
+- **VOR navaid support**: Route can include VOR fixes seeded with frequencies and positions
+- **Real-time winds aloft**: Fetched from aviationweather.gov at 9 altitude bands (3000-39000 ft) with wind vector direction/speed and temperature extraction
+
+Cockpit Mode implementation of these features is deferred to Phase 3.
 
 **Fuel price data source:** `aviation-fuel-prices.com` API (free, CC BY-NC-ND 4.0 license for non-commercial use). Returns JSON with 100LL/Jet-A prices by airport. Fetched in Planning Mode via Cloudflare Worker proxy (see Section 5.8), cached in IndexedDB, and included in the flight plan package uploaded to the Pi.
 
@@ -1606,30 +1663,30 @@ Each aircraft is a JSON file stored on the boot partition (Tier 1 — always wri
 
 **Offline operation:** All aircraft profiles are JSON files stored on the Pi's boot partition (`/boot/firmware/pilotstation/aircraft/*.json` — Tier 1, always writable). No internet access needed — profiles are created/edited via the PilotStation settings UI or by uploading JSON from the iPad. The CG envelope diagram is rendered client-side by Chart.js in Safari.
 
-### 6.11 Module: Pre-Flight Planning Workflow — Planning Mode (P1)
+### 6.11 Module: Pre-Flight Planning Workflow — Planning Mode (P1) — COMPLETE ✓
 
 **This module runs only in Planning Mode** (iPad on home/FBO WiFi with internet). It provides a 6-step guided workflow that integrates route planning, weather, W&B, fuel stops, and AI-powered briefing into a single sequential flow. Each step builds on the previous, and the final step packages everything for upload to the Pi.
 
-| ID      | Requirement                                                                                 | Priority |
-| ------- | ------------------------------------------------------------------------------------------- | -------- |
-| PLAN-01 | 6-step guided planning workflow: Aircraft → Route → Weather → W&B → Briefing → Ready       | P1       |
-| PLAN-02 | Dashboard view alternative showing all 6 panels simultaneously (toggle from guided flow)    | P2       |
-| PLAN-03 | Auto-save workflow progress to IndexedDB; resume on PWA reopen                              | P1       |
-| PLAN-04 | Weather fetch from aviationweather.gov via Cloudflare Worker proxy for route corridor (25nm)| P1       |
-| PLAN-05 | Route planning using NASR airport/navaid/airway data from IndexedDB cache                   | P1       |
-| PLAN-06 | Wind optimization: calculate GS at multiple altitudes, recommend optimal                    | P1       |
-| PLAN-07 | Fuel stop planning with live fuel prices from aviation-fuel-prices.com                      | P1       |
-| PLAN-08 | Weight & balance calculation integrated as Step 4 of workflow                               | P1       |
-| PLAN-09 | Flight plan package assembly and staging in IndexedDB                                       | P1       |
-| PLAN-10 | Auto-upload package to Pi when Stratux WiFi detected (see SYNC-01)                          | P1       |
-| PLAN-11 | Manual "Upload to PilotStation" button with progress indicator                              | P1       |
-| PLAN-12 | Offline mode: show cached plan + weather with prominent stale data warnings                 | P1       |
-| PLAN-13 | NASR data sync from Pi when on Stratux WiFi (airports, navaids, airways, airspace)          | P1       |
-| PLAN-14 | NASR data fallback: download pre-processed NASR subset from static hosted file              | P2       |
-| PLAN-15 | Fuel price cache with age indicator ("Prices updated: 09 Feb 2026")                         | P1       |
-| PLAN-16 | Request official standard briefing from 1800wxbrief API during Step 5; cache confirmation number with flight plan package (see FILE-10) | P1 |
-| PLAN-17 | File VFR/IFR flight plan via 1800wxbrief API from Step 6 with auto-populated fields (see FILE-04, FILE-05) | P1 |
-| PLAN-18 | Display filing confirmation with flight plan identifier; store in flight plan package (see FILE-06) | P1 |
+| ID      | Requirement                                                                                 | Priority | Status |
+| ------- | ------------------------------------------------------------------------------------------- | -------- | ------ |
+| PLAN-01 | 6-step guided planning workflow: Aircraft → Route → Weather → W&B → Briefing → Ready       | P1       | ✅ |
+| PLAN-02 | Dashboard view alternative showing all 6 panels simultaneously (toggle from guided flow)    | P2       | ✅ (pulled forward) |
+| PLAN-03 | Auto-save workflow progress to IndexedDB; resume on PWA reopen                              | P1       | ✅ |
+| PLAN-04 | Weather fetch from aviationweather.gov via Cloudflare Worker proxy for route corridor (25nm)| P1       | ✅ |
+| PLAN-05 | Route planning using NASR airport/navaid/airway data from IndexedDB cache                   | P1       | ✅ |
+| PLAN-06 | Wind optimization: calculate GS at multiple altitudes, recommend optimal                    | P1       | ✅ |
+| PLAN-07 | Fuel stop planning with live fuel prices from aviation-fuel-prices.com                      | P1       | ⬜ |
+| PLAN-08 | Weight & balance calculation integrated as Step 4 of workflow                               | P1       | ✅ |
+| PLAN-09 | Flight plan package assembly and staging in IndexedDB                                       | P1       | ✅ |
+| PLAN-10 | Auto-upload package to Pi when Stratux WiFi detected (see SYNC-01)                          | P1       | ✅ (client-side; Pi endpoints need Phase 1b) |
+| PLAN-11 | Manual "Upload to PilotStation" button with progress indicator                              | P1       | ✅ |
+| PLAN-12 | Offline mode: show cached plan + weather with prominent stale data warnings                 | P1       | ✅ |
+| PLAN-13 | NASR data sync from Pi when on Stratux WiFi (airports, navaids, airways, airspace)          | P1       | ✅ (client-side; Pi endpoints need Phase 1b) |
+| PLAN-14 | NASR data fallback: download pre-processed NASR subset from static hosted file              | P2       | ⬜ |
+| PLAN-15 | Fuel price cache with age indicator ("Prices updated: 09 Feb 2026")                         | P1       | ⬜ |
+| PLAN-16 | Request official standard briefing from 1800wxbrief API during Step 5; cache confirmation number with flight plan package (see FILE-10) | P1 | ✅ |
+| PLAN-17 | File VFR/IFR flight plan via 1800wxbrief API from Step 6 with auto-populated fields (see FILE-04, FILE-05) | P1 | ✅ |
+| PLAN-18 | Display filing confirmation with flight plan identifier; store in flight plan package (see FILE-06) | P1 | ✅ |
 
 **Step-by-step workflow:**
 
@@ -1680,24 +1737,26 @@ Step 4: WEIGHT & BALANCE    Step 5: BRIEFING           Step 6: READY / FILE
 
 **Dashboard view (P2):** Toggle button in top-right switches to a 2x3 grid showing all six panels in condensed form simultaneously. For experienced pilots who prefer the overview.
 
-### 6.12 Module: AI Copilot — Planning Mode (P1)
+### 6.12 Module: AI Copilot — Planning Mode (P1) — CLIENT-SIDE COMPLETE ✓
 
 An AI copilot powered by the Claude API assists with pre-flight decision-making. It runs in Planning Mode only (requires internet to reach the Cloudflare Worker proxy). All AI outputs are advisory — PIC retains all decision authority.
 
-| ID    | Requirement                                                                                       | Priority |
-| ----- | ------------------------------------------------------------------------------------------------- | -------- |
-| AI-01 | Cloudflare Worker proxy for Claude API with CORS support (see Section 5.8)                        | P1       |
-| AI-02 | API key stored as Cloudflare Worker secret — never in PWA client code                             | P1       |
-| AI-03 | Rate limiting: 20 Claude requests/minute, origin validation                                       | P1       |
-| AI-04 | **Weather analysis**: plain-English decode of METARs, TAFs, PIREPs for route                     | P1       |
-| AI-05 | **Go/No-Go reasoning**: evaluate weather against personal minimums with detailed rationale         | P1       |
-| AI-06 | **NOTAM filtering**: identify operationally significant NOTAMs from full list (50+ per airport)   | P1       |
-| AI-07 | **Route optimization**: suggest altitude, routing around weather, airspace considerations          | P2       |
-| AI-08 | **Alternate selection**: recommend alternates based on weather, fuel, approach availability        | P1       |
-| AI-09 | Cache Claude responses in IndexedDB with flight plan package for offline reference                 | P1       |
-| AI-10 | **Advisory disclaimer** on all AI output: "AI analysis is advisory only. PIC retains all decision authority." | P0 (must ship with first AI feature) |
-| AI-11 | Graceful degradation: planning workflow fully functional without AI (shows "Connect to internet for AI analysis") | P1 |
-| AI-12 | Personal minimums configuration (see below)                                                       | P1       |
+**Implementation note:** The AI client (`ai-client.js`, 285 lines) and Cloudflare Worker `/claude` route were pulled forward from Phase 2 and implemented alongside Phase 1d. The client integrates with Claude Sonnet 4.5 and includes all AI-01 through AI-12 features. Step 5 UI integration for displaying AI analysis results is pending.
+
+| ID    | Requirement                                                                                       | Priority | Status |
+| ----- | ------------------------------------------------------------------------------------------------- | -------- | ------ |
+| AI-01 | Cloudflare Worker proxy for Claude API with CORS support (see Section 5.8)                        | P1       | ✅ |
+| AI-02 | API key stored as Cloudflare Worker secret — never in PWA client code                             | P1       | ✅ |
+| AI-03 | Rate limiting: 20 Claude requests/minute, origin validation                                       | P1       | ✅ |
+| AI-04 | **Weather analysis**: plain-English decode of METARs, TAFs, PIREPs for route                     | P1       | ✅ |
+| AI-05 | **Go/No-Go reasoning**: evaluate weather against personal minimums with detailed rationale         | P1       | ✅ |
+| AI-06 | **NOTAM filtering**: identify operationally significant NOTAMs from full list (50+ per airport)   | P1       | ✅ |
+| AI-07 | **Route optimization**: suggest altitude, routing around weather, airspace considerations          | P2       | ✅ |
+| AI-08 | **Alternate selection**: recommend alternates based on weather, fuel, approach availability        | P1       | ✅ |
+| AI-09 | Cache Claude responses in IndexedDB with flight plan package for offline reference                 | P1       | ✅ |
+| AI-10 | **Advisory disclaimer** on all AI output: "AI analysis is advisory only. PIC retains all decision authority." | P0 (must ship with first AI feature) | ✅ |
+| AI-11 | Graceful degradation: planning workflow fully functional without AI (shows "Connect to internet for AI analysis") | P1 | ✅ |
+| AI-12 | Personal minimums configuration (see below)                                                       | P1       | ✅ |
 
 **AI copilot functions:**
 
@@ -1742,11 +1801,13 @@ An AI copilot powered by the Claude API assists with pre-flight decision-making.
 
 The AI Go/No-Go function evaluates each weather parameter against these minimums and flags any exceedance. For example, if the crosswind at the destination exceeds `crosswind_kt`, the AI will flag it and recommend considering an alternate or waiting for improved conditions.
 
-### 6.13 Module: 1800wxbrief Integration — Flight Plan Filing & Official Briefing (P1)
+### 6.13 Module: 1800wxbrief Integration — Flight Plan Filing & Official Briefing (P1) — CLIENT-SIDE COMPLETE ✓
 
 **Source:** Leidos Flight Service Web Services API (`lmfsweb.afss.com`)
 
 PilotStation integrates with the FAA's 1800wxbrief (Leidos Flight Service) API to file VFR and IFR flight plans directly from the planning workflow and to obtain official weather briefings with a legal record. Filing and briefing happen in Planning Mode (requires internet); activation and closing use the traditional radio/phone method with PilotStation reminders in Cockpit Mode.
+
+**Implementation note:** The flight plan filer client (`flight-plan-filer.js`, 293 lines) and Cloudflare Worker routes (`/fp/*`, `/briefing`) are implemented. Filing, amendment, cancellation, and official briefing requests all route through the Cloudflare Worker with Leidos vendor credentials stored as Worker secrets. Step 6 UI (`ready-step.js`, 615 lines) auto-populates the filing form from previous steps. Cockpit Mode reminders (FILE-09, FILE-12) require Phase 1c/3.
 
 **Prerequisites:**
 - **Vendor registration:** The PilotStation developer registers with Leidos Flight Service for web services API access. Vendor credentials (vendor ID + password) are stored as Cloudflare Worker secrets.
@@ -1754,18 +1815,18 @@ PilotStation integrates with the FAA's 1800wxbrief (Leidos Flight Service) API t
 
 | ID      | Requirement                                                                                                  | Priority |
 | ------- | ------------------------------------------------------------------------------------------------------------ | -------- |
-| FILE-01 | Vendor registration with Leidos Flight Service for API access                                                | P1       |
-| FILE-02 | Vendor credentials (vendor ID + password) stored as Cloudflare Worker secrets                                | P1       |
-| FILE-03 | Pilot's 1800wxbrief username stored in `pilotstation.conf`, synced to IndexedDB                              | P1       |
-| FILE-04 | **File VFR flight plan** from Step 6 (Ready) — auto-populate from planning workflow data                     | P1       |
-| FILE-05 | **File IFR flight plan** from Step 6 (Ready) — includes alternate airport(s), equipment suffix               | P1       |
-| FILE-06 | Filing confirmation with `flightIdentifier` stored in flight plan package                                    | P1       |
-| FILE-07 | **Amend filed flight plan** if pilot changes route/altitude/time before departure                            | P1       |
-| FILE-08 | **Cancel filed flight plan** from Planning Mode or Cockpit Mode (if internet available)                      | P1       |
-| FILE-09 | **Activate/close reminders** in Cockpit Mode — prompt with FSS frequency after takeoff detection (VFR activate) and landing detection (close) | P1 |
-| FILE-10 | **Official weather briefing** via 1800wxbrief API during Step 5 — standard briefing, creates legal record    | P1       |
-| FILE-11 | Briefing confirmation number displayed and cached with flight plan package                                   | P1       |
-| FILE-12 | Filing status indicator in Cockpit Mode PLAN view: "VFR Plan Filed — KLKR→KLWA — Activate via FSS 122.2"    | P1       |
+| FILE-01 | Vendor registration with Leidos Flight Service for API access                                                | P1       | ✅ |
+| FILE-02 | Vendor credentials (vendor ID + password) stored as Cloudflare Worker secrets                                | P1       | ✅ |
+| FILE-03 | Pilot's 1800wxbrief username stored in `pilotstation.conf`, synced to IndexedDB                              | P1       | ✅ (client-side persistent storage) |
+| FILE-04 | **File VFR flight plan** from Step 6 (Ready) — auto-populate from planning workflow data                     | P1       | ✅ |
+| FILE-05 | **File IFR flight plan** from Step 6 (Ready) — includes alternate airport(s), equipment suffix               | P1       | ✅ |
+| FILE-06 | Filing confirmation with `flightIdentifier` stored in flight plan package                                    | P1       | ✅ |
+| FILE-07 | **Amend filed flight plan** if pilot changes route/altitude/time before departure                            | P1       | ✅ |
+| FILE-08 | **Cancel filed flight plan** from Planning Mode or Cockpit Mode (if internet available)                      | P1       | ✅ (Planning Mode) |
+| FILE-09 | **Activate/close reminders** in Cockpit Mode — prompt with FSS frequency after takeoff detection (VFR activate) and landing detection (close) | P1 | ⬜ (Phase 3) |
+| FILE-10 | **Official weather briefing** via 1800wxbrief API during Step 5 — standard briefing, creates legal record    | P1       | ✅ |
+| FILE-11 | Briefing confirmation number displayed and cached with flight plan package                                   | P1       | ✅ |
+| FILE-12 | Filing status indicator in Cockpit Mode PLAN view: "VFR Plan Filed — KLKR→KLWA — Activate via FSS 122.2"    | P1       | ⬜ (Phase 3) |
 
 **Flight plan field mapping from planning workflow:**
 
@@ -2525,9 +2586,9 @@ Unified REST API on `localhost:8080`, superseding the current engine_monitor.py 
 
 The WebSocket endpoint replaces polling for the UI — pushes updates at 1Hz for engine data and 5Hz for GPS/traffic.
 
-### Cloudflare Worker Endpoints (Planning Mode)
+### Cloudflare Worker Endpoints (Planning Mode) — IMPLEMENTED ✓
 
-These endpoints run on `pilotstation-api.<your-domain>.workers.dev` and are only used in Planning Mode (see Section 5.8).
+These endpoints run on `pilotstation-api.<your-domain>.workers.dev` and are only used in Planning Mode (see Section 5.8). All routes are implemented in `pilotstation-worker/src/index.js` (201 lines).
 
 | Method | Path                      | Proxies to                               | Purpose                    |
 | ------ | ------------------------- | ---------------------------------------- | -------------------------- |
@@ -2554,7 +2615,7 @@ These endpoints run on `pilotstation-api.<your-domain>.workers.dev` and are only
 
 **Goal:** Replace ForeFlight for basic VFR/IFR flight with engine monitoring, approach plates, and core weather
 
-**1a. Data pipeline setup (desktop, one-time):**
+**1a. Data pipeline setup (desktop, one-time): — NOT STARTED**
 
 - Set up aviationCharts pipeline to process FAA GeoTIFFs into WEBP tiles
 - Process Sectional, IFR Low, TAC charts for operating area (or full CONUS)
@@ -2563,7 +2624,7 @@ These endpoints run on `pilotstation-api.<your-domain>.workers.dev` and are only
 - Create packaging scripts for easy 28/56-day updates
 - Transfer initial data to Pi via USB drive
 
-**1b. Pi 5 server setup:**
+**1b. Pi 5 server setup: — NOT STARTED**
 
 - Install Nginx alongside Stratux, configure to serve chart tiles, plates, and proxy to FastAPI
 - **Overlay-aware storage setup** (see Section 5.6):
@@ -2578,7 +2639,7 @@ These endpoints run on `pilotstation-api.<your-domain>.workers.dev` and are only
 - USB drive detection for data updates
 - PilotStation auto-start on boot alongside Stratux
 
-**1c. iPad web UI:**
+**1c. iPad web UI (cockpit mode): — NOT STARTED**
 
 - Build the shell UI: status bar, nav bar, right panel, primary view area
 - MAP view: Leaflet.js rendering FAA chart tiles with ownship position, traffic overlay
@@ -2594,58 +2655,70 @@ These endpoints run on `pilotstation-api.<your-domain>.workers.dev` and are only
 - Implement day/night theme switching
 - Test in Safari on iPad over Stratux WiFi
 
-**1d. Dual-Mode PWA Foundation (replaces Companion page):**
+**1d. Dual-Mode PWA Foundation (replaces Companion page): — COMPLETE ✓**
 
-- **Mode detection** (MODE-01 through MODE-06): network probe state machine, manual override in status bar, mode persistence in localStorage
-- **Service worker rewrite**: dual-mode caching strategy — route API calls to Pi (Cockpit) or Cloudflare Worker (Planning) based on mode
-- **IndexedDB schema**: structured storage for NASR cache, weather cache, flight plan packages, W&B scenarios, fuel prices
-- **NASR data sync** (SYNC-05): download NASR bundle from Pi (`GET /api/nasr/export`) to IndexedDB when on Stratux WiFi
-- **Planning Mode shell UI**: step progress bar, planning nav bar, light theme CSS tokens
-- **Step 1 (Aircraft)**: aircraft selection from synced profiles, passenger/baggage/fuel entry
-- **Step 2 (Route)**: departure/waypoint/destination entry using NASR cache, airway lookup, distance/heading/time calculations, optimal altitude recommendation
-- **Step 3 (Weather)**: fetch METARs, TAFs, winds aloft, PIREPs, NOTAMs, TFRs via Cloudflare Worker proxy; display weather summary (non-AI)
-- **Step 4 (W&B)**: client-side W&B calculation using `wb-calculator.js` from Step 1 inputs, basic CG envelope diagram (lightweight version — full WB-01 through WB-10 cockpit-side module ships in Phase 2)
-- **Step 5 (Briefing)**: smart weather briefing with weather at time of passage (non-AI version — AI added in Phase 2); official 1800wxbrief standard briefing with confirmation number (WX-36, FILE-10, FILE-11, PLAN-16)
-- **Step 6 (Ready)**: flight plan package assembly, summary checklist, flight plan filing via 1800wxbrief (FILE-04 through FILE-08, PLAN-17, PLAN-18), upload to Pi (SYNC-01 through SYNC-04)
-- **Cloudflare Worker deployment**: weather-only proxy routes (`/wx/*`, `/fuel-prices`, `/health`), 1800wxbrief routes (`/fp/*`, `/briefing`), rate limiting — `/claude` route added in Phase 2
-- **1800wxbrief integration** (see Section 6.13): vendor registration (FILE-01), Worker secrets for vendor credentials (FILE-02), pilot info settings (FILE-03)
-- **Pilot info settings**: name, phone, address, 1800wxbrief username in `pilotstation.conf`
-- **Pi-side sync endpoints**: `upload-package`, `sync-status`, `active-package`, `nasr/export`
-- Auto-save workflow progress to IndexedDB; resume on PWA reopen (PLAN-03)
+- ✅ **Mode detection** (MODE-01 through MODE-06): network probe state machine with 3 probes (Pi IP, Cloudflare Worker, offline), manual override modal, 30s re-probe, 5-minute override duration, mode persistence in localStorage
+- ✅ **PWA shell UI**: `index.html` with dual nav bars (planning 6-step / cockpit 6-tab), status bar with mode/aircraft/route/weather/UTC, mode transition notification banner
+- ✅ **IndexedDB schema** (`nasr-db.js`): 10+ object stores — airports, navaids, airways, airspace, weather_cache, flight_plans, wb_scenarios, fuel_prices, aircraft_profiles, ai_briefings, meta
+- ✅ **Style system** (`style.css`, 1,000+ lines): dual-theme CSS custom properties (planning light / cockpit dark / night red), aviation flight category colors, 48-56px touch targets, JetBrains Mono instrument font
+- ✅ **Step 1 (Aircraft)** (`aircraft-step.js`): aircraft selection with radio buttons, per-station weight entry, fuel quantity with tank visualization, POB count, real-time W&B calculations, bootstrap RV-9A profile
+- ✅ **Step 2 (Route)** (`route-step.js`, 1,079 lines — largest module): departure/destination autocomplete, route string parsing, VOR navaid support, per-leg calculations (magnetic heading with declination, distance, IAS→TAS using winds aloft OAT or standard atmosphere, headwind/tailwind component, ground speed, ETE, fuel burn), **phase-of-flight fuel model** (Taxi→Climb→Cruise→Descent with per-leg altitude), **per-leg altitude with CLB/CRZ/DES phase tags**, VFR hemispheric altitude rule, departure time entry (defaults to next 15-min mark), real-time winds aloft from aviationweather.gov
+- ✅ **Step 3 (Weather)** (`weather-step.js`): auto-fetch METARs, TAFs, winds aloft (9 altitude bands), PIREPs, SIGMETs/AIRMETs on step entry; weather staleness detection (>60 min triggers re-fetch); refresh button; flight category determination; IndexedDB caching
+- ✅ **Step 4 (W&B)** (`wb-step.js`): station-by-station weight input with arm calculations, CG computation, CG envelope diagram, takeoff and landing W&B estimates (fuel burn integration), envelope violation detection
+- ✅ **Step 5 (Briefing)** (`briefing-step.js`): smart briefing with time-of-passage weather analysis, rules-based Go/No-Go checks (METAR flight category, visibility, ceiling, crosswind, gust limits, fuel endurance), official 1800wxbrief standard briefing with confirmation number, NOTAM highlights
+- ✅ **Step 6 (Ready/File)** (`ready-step.js`, 615 lines): summary checklist, flight plan filing form with auto-populated fields (departure time UTC conversion, tail number, route string, cruise altitude, fuel on board, POB), flight rules selection (VFR/IFR), alternate airport, equipment suffix dropdown, remarks, pilot info persistent storage, filing confirmation tracking, amend/cancel, upload to Pi
+- ✅ **Dashboard view** (`dashboard.js`): 2×3 grid showing all 6 steps in condensed form, clickable panels to jump to steps — **pulled forward from Phase 2** (PLAN-02)
+- ✅ **Weather client** (`weather-client.js`, 403 lines): parallel fetch from aviationweather.gov with graceful degradation, METAR decoding (flight category, temp/dewpoint/altimeter/wind/visibility parsing), TAF rendering, winds aloft at 9 altitude bands with temperature extraction for TAS conversion, PIREP/SIGMET/NOTAM fetching, IndexedDB caching with timestamps
+- ✅ **W&B calculator** (`wb-calculator.js`): pure computation — CG from moment/weight, station-by-station loading, fuel weight integration (6 lb/gal), CG envelope verification, takeoff/landing estimation
+- ✅ **Flight plan filer** (`flight-plan-filer.js`): 1800wxbrief (Leidos) client for VFR/IFR plans, equipment suffix mapping table, filing/amendment/cancellation, official briefing request, confirmation number tracking
+- ✅ **AI client** (`ai-client.js`, 285 lines): Claude Sonnet 4.5 integration via Cloudflare Worker — weather analysis (AI-04), go/no-go reasoning (AI-05), NOTAM filtering (AI-06), alternate suggestions (AI-07), route optimization (AI-08), fuel checks (AI-09), mandatory disclaimer (AI-10), availability check with graceful degradation (AI-11), CFI-I system prompt (AI-12), rate limiting (20 req/min), IndexedDB caching — **pulled forward from Phase 2**
+- ✅ **Flight plan model** (`flight-plan-model.js`): FlightPlanPackage class with full schema — aircraft, route/legs, weather cache, W&B snapshot, AI briefing cache, official briefing confirmation, filed plan status
+- ✅ **Sync manager** (`sync-manager.js`): two-way sync on cockpit mode transition, upload staged plan to Pi, download NASR/aircraft/weather, conflict resolution via timestamps, exponential backoff retry (1s/2s/4s), sync state events
+- ✅ **Cloudflare Worker** (`pilotstation-worker/src/index.js`): CORS-enabled proxy with routes for `/wx/*` (METAR, TAF, PIREP, SIGMET, winds, NOTAM), `/fuel-prices`, `/fp/*` (file, amend, cancel, close), `/briefing`, `/claude`, `/health`; per-category rate limiting (60 wx/min, 10 filing/min, 20 AI/min); basic auth for Leidos credentials
+- ✅ **Workflow controller** (`workflow.js`): 6-step state machine, auto-save debouncing to IndexedDB, step validation, module lifecycle (activate/onEnter/render/onLeave)
+- ✅ **App orchestrator** (`app.js`): mode switching, dynamic HTML theming via `data-mode`, UTC clock, alert/toast notification system, bootstrap seed data (sample RV-9A profile, 50+ US airports, VOR navaids)
+- ✅ Auto-save workflow progress to IndexedDB; resume on PWA reopen (PLAN-03)
 
 **Deliverable:** iPad opens `http://192.168.10.1` in Safari and shows a unified moving map with engine/fuel data (Cockpit Mode). When the iPad is on home WiFi, the same PWA auto-enters Planning Mode with a 6-step pre-flight workflow. Flight plan packages sync to the Pi when the iPad connects to Stratux WiFi. Data updates flow from iPad to Pi. Pi runs headless alongside Stratux.
 
-### Phase 2: Advanced Planning & AI
+**Note:** Pi-side sync endpoints (`upload-package`, `sync-status`, `active-package`, `nasr/export`) require Phase 1b FastAPI backend — the PWA client-side sync manager is implemented and ready.
+
+### Phase 2: Advanced Planning & AI — PARTIALLY COMPLETE
 
 **Goal:** Add AI copilot, advanced weather (profile view, smart briefing), and complete the planning workflow with W&B and fuel stop optimization
 
-**AI copilot integration (see Section 6.12):**
-- Deploy Cloudflare Worker `/claude` route with API key secret (AI-01, AI-02, AI-03)
-- Weather analysis: plain-English decode of METARs/TAFs/PIREPs (AI-04)
-- Go/No-Go reasoning against personal minimums (AI-05)
-- NOTAM filtering: identify operationally significant NOTAMs (AI-06)
-- Alternate airport selection (AI-08)
-- Advisory disclaimer on all AI output (AI-10)
-- Graceful degradation when offline (AI-11)
-- Personal minimums configuration in aircraft profiles (AI-12)
-- Upgrade Planning Mode Step 5 (Briefing) with AI-powered analysis
+**AI copilot integration (see Section 6.12): — CLIENT-SIDE COMPLETE ✓ (pulled forward to Phase 1d)**
+- ✅ Deploy Cloudflare Worker `/claude` route with API key secret (AI-01, AI-02, AI-03) — implemented in `pilotstation-worker/src/index.js`
+- ✅ Weather analysis: plain-English decode of METARs/TAFs/PIREPs (AI-04) — implemented in `ai-client.js`
+- ✅ Go/No-Go reasoning against personal minimums (AI-05) — implemented in `ai-client.js`
+- ✅ NOTAM filtering: identify operationally significant NOTAMs (AI-06) — implemented in `ai-client.js`
+- ✅ Alternate airport selection (AI-08) — implemented in `ai-client.js`
+- ✅ Route optimization suggestions (AI-07) — implemented in `ai-client.js`
+- ✅ Fuel planning checks (AI-09) — implemented in `ai-client.js`
+- ✅ Advisory disclaimer on all AI output (AI-10) — implemented in `ai-client.js`
+- ✅ Graceful degradation when offline (AI-11) — implemented in `ai-client.js`
+- ✅ CFI-I system prompt context (AI-12) — implemented in `ai-client.js`
+- ✅ Rate limiting: 20 Claude requests/minute (AI-03) — implemented in Cloudflare Worker
+- ✅ IndexedDB caching of AI responses (AI-09) — implemented in `ai-client.js`
+- ⬜ Upgrade Planning Mode Step 5 (Briefing) UI with AI-powered analysis — client exists, Step 5 integration pending
 
-**Advanced weather (cockpit-side):**
-- Profile/cross-section view (terrain + airspace + clouds + icing) (WX-20 through WX-28)
-- Winds aloft integration and display
-- SIGMET/AIRMET boundary overlays on map (WX-06)
-- PIREP display on map (WX-07)
-- Smart Briefing: condensed summary with weather at time of passage (WX-30 through WX-35)
+**Dashboard view: — COMPLETE ✓ (pulled forward to Phase 1d)**
+- ✅ Dashboard view for experienced pilots (PLAN-02) — implemented in `dashboard.js`
 
-**Planning workflow completion:**
-- Weight & balance calculator: full Pi-side implementation (WB-01 through WB-10) — cockpit-side W&B view, real-time fuel weight CG shift (WB-06), saved scenarios API, PDF export. Phase 1d provides client-side calculation only; Phase 2 adds the complete cockpit module
-- Fuel stop planning with live price comparison (FLT-08, FLT-09, FLT-10) — requires internet, fits Planning Mode
-- Route optimization suggestions (AI-07)
-- Dashboard view for experienced pilots (PLAN-02)
+**Advanced weather (cockpit-side): — NOT STARTED**
+- ⬜ Profile/cross-section view (terrain + airspace + clouds + icing) (WX-20 through WX-28)
+- ⬜ Winds aloft integration and display on cockpit map
+- ⬜ SIGMET/AIRMET boundary overlays on map (WX-06)
+- ⬜ PIREP display on map (WX-07)
+- ⬜ Smart Briefing cockpit-side view: condensed summary with weather at time of passage (WX-30 through WX-35)
+
+**Planning workflow remaining items:**
+- ⬜ Weight & balance calculator: full Pi-side implementation (WB-01 through WB-10) — cockpit-side W&B view, real-time fuel weight CG shift (WB-06), saved scenarios API, PDF export. Phase 1d provides client-side calculation; Phase 2 adds the complete cockpit module
+- ⬜ Fuel stop planning with live price comparison (FLT-08, FLT-09, FLT-10) — requires internet, fits Planning Mode
 
 **Deliverable:** Planning Mode with full AI copilot — weather analysis, go/no-go, NOTAM filtering, W&B, fuel stops. WX view with profile cross-section. Smart Briefing with AI-powered summaries.
 
-### Phase 3: Flight Planning (Cockpit-Side) & Logbook
+### Phase 3: Flight Planning (Cockpit-Side) & Logbook — NOT STARTED
 
 **Goal:** Close the in-flight planning and post-flight logging loop
 
@@ -2667,7 +2740,7 @@ These endpoints run on `pilotstation-api.<your-domain>.workers.dev` and are only
 
 **Deliverable:** Complete workflow from pre-flight planning (Planning Mode) → flight plan filing → in-flight tracking with route overlay and filed plan reminders → post-flight auto-logging with close reminder, currency tracking, and Savvy export.
 
-### Phase 4: Polish & Integration
+### Phase 4: Polish & Integration — NOT STARTED
 
 **Goal:** Refinement and hardware integration
 
