@@ -1,0 +1,8 @@
+name = "pilotstation-api"
+main = "src/index.js"
+compatibility_date = "2024-01-01"
+
+# Secrets (set via `wrangler secret put`):
+# - LEIDOS_VENDOR_ID
+# - LEIDOS_VENDOR_PASSWORD
+# - ANTHROPIC_API_KEY (Phase 2)

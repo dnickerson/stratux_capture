@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en" data-mode="planning">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#0066cc">
+    <meta name="apple-mobile-web-app-title" content="PilotStation">
+    <title>PilotStation</title>
+    <link rel="manifest" href="./manifest.json">
+    <link rel="stylesheet" href="./style.css">
+    <link rel="stylesheet" href="./lib/leaflet/leaflet.css">
+    <link rel="stylesheet" href="./planning/planning.css">
+</head>
+<body>
+    <!-- Mode transition notification banner -->
+    <div id="modeBanner" class="mode-banner" hidden>
+        <span id="modeBannerText"></span>
+    </div>
+
+    <!-- Status bar -->
+    <header id="statusBar" class="status-bar">
+        <div class="status-bar-left">
+            <span id="statusMode" class="status-mode-badge" title="Tap to change mode">PLANNING</span>
+            <span id="statusAircraft" class="status-item"></span>
+            <span id="statusRoute" class="status-item"></span>
+        </div>
+        <div class="status-bar-right">
+            <span id="statusWeather" class="status-item"></span>
+            <span id="statusTime" class="status-item"></span>
+        </div>
+    </header>
+
+    <!-- Main content area -->
+    <main id="mainContent" class="main-content">
+        <!-- Planning Mode: step content renders here -->
+        <div id="planningView" class="view-container">
+            <div id="stepContent" class="step-content"></div>
+        </div>
+
+        <!-- Cockpit Mode: primary view + right panel -->
+        <div id="cockpitView" class="view-container" hidden>
+            <div class="cockpit-layout">
+                <div id="primaryView" class="primary-view"></div>
+                <div id="rightPanel" class="right-panel">
+                    <div id="rightPanelTop" class="right-panel-top"></div>
+                    <div id="rightPanelBottom" class="right-panel-bottom"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Offline Mode: cached plan warning -->
+        <div id="offlineView" class="view-container" hidden>
+            <div class="offline-warning">
+                <h2>Offline Mode</h2>
+                <p>No network connection detected. Showing cached data.</p>
+                <p class="stale-warning" id="offlineStaleWarning"></p>
+            </div>
+        </div>
+    </main>
+
+    <!-- Nav bar: Planning Mode (step progress) -->
+    <nav id="planningNav" class="nav-bar planning-nav">
+        <button class="step-btn" data-step="1"><span class="step-num">1</span><span class="step-label">AIRCRAFT</span></button>
+        <button class="step-btn" data-step="2"><span class="step-num">2</span><span class="step-label">ROUTE</span></button>
+        <button class="step-btn" data-step="3"><span class="step-num">3</span><span class="step-label">WEATHER</span></button>
+        <button class="step-btn" data-step="4"><span class="step-num">4</span><span class="step-label">W&B</span></button>
+        <button class="step-btn" data-step="5"><span class="step-num">5</span><span class="step-label">BRIEF</span></button>
+        <button class="step-btn" data-step="6"><span class="step-num">6</span><span class="step-label">READY</span></button>
+    </nav>
+
+    <!-- Nav bar: Cockpit Mode (6-tab) -->
+    <nav id="cockpitNav" class="nav-bar cockpit-nav" hidden>
+        <button class="tab-btn active" data-view="map">MAP</button>
+        <button class="tab-btn" data-view="engine">ENGINE</button>
+        <button class="tab-btn" data-view="fuel">FUEL</button>
+        <button class="tab-btn" data-view="wx">WX</button>
+        <button class="tab-btn" data-view="plan">PLAN</button>
+        <button class="tab-btn" data-view="log">LOG</button>
+    </nav>
+
+    <!-- Manual mode override modal -->
+    <div id="modeModal" class="modal-overlay" hidden>
+        <div class="modal-card">
+            <h3>Select Mode</h3>
+            <button class="modal-btn" data-mode="planning">Planning Mode<span class="modal-desc">Home/FBO WiFi — pre-flight workflow</span></button>
+            <button class="modal-btn" data-mode="cockpit">Cockpit Mode<span class="modal-desc">Stratux WiFi — in-flight UI</span></button>
+            <button class="modal-btn" data-mode="offline">Offline Mode<span class="modal-desc">No network — cached data only</span></button>
+            <button class="modal-btn modal-btn-cancel" id="modeModalCancel">Cancel</button>
+        </div>
+    </div>
+
+    <!-- Libraries -->
+    <script src="./lib/chart.min.js"></script>
+
+    <!-- Shared modules -->
+    <script src="./shared/nasr-db.js"></script>
+    <script src="./shared/flight-plan-model.js"></script>
+    <script src="./shared/weather-client.js"></script>
+    <script src="./shared/wb-calculator.js"></script>
+    <script src="./shared/flight-plan-filer.js"></script>
+    <script src="./shared/sync-manager.js"></script>
+    <script src="./shared/ai-client.js"></script>
+
+    <!-- Planning mode step modules -->
+    <script src="./planning/workflow.js"></script>
+    <script src="./planning/aircraft-step.js"></script>
+    <script src="./planning/route-step.js"></script>
+    <script src="./planning/weather-step.js"></script>
+    <script src="./planning/wb-step.js"></script>
+    <script src="./planning/briefing-step.js"></script>
+    <script src="./planning/ready-step.js"></script>
+    <script src="./planning/dashboard.js"></script>
+
+    <!-- Core -->
+    <script src="./mode-detector.js"></script>
+    <script src="./app.js"></script>
+
+    <script>
+        // Service worker registration
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('./service-worker.js')
+                .then(reg => console.log('SW registered:', reg.scope))
+                .catch(err => console.error('SW registration failed:', err));
+        }
+    </script>
+</body>
+</html>

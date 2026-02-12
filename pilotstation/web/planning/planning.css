@@ -1,0 +1,728 @@
+/* PilotStation — Planning Mode Step Styles
+ * Styles specific to the 6-step planning workflow UI.
+ * Base design tokens and components are in ../style.css
+ */
+
+/* ========== Step Header (prev/next navigation) ========== */
+
+.step-header {
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 16px;
+}
+
+.step-title {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.step-header .btn {
+    min-width: 100px;
+    font-size: 13px;
+}
+
+/* ========== Step 1: Aircraft Selection ========== */
+
+.aircraft-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.aircraft-option {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    cursor: pointer;
+    min-height: var(--touch-min);
+    transition: border-color 0.2s, background 0.2s;
+}
+
+.aircraft-option:active {
+    background: var(--bg-surface);
+}
+
+.aircraft-option.selected {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.aircraft-option input[type="radio"] {
+    accent-color: var(--accent);
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+}
+
+.aircraft-name {
+    font-weight: 600;
+    font-size: 15px;
+}
+
+.aircraft-tail {
+    margin-left: auto;
+}
+
+/* Loading form */
+.loading-form {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.loading-row {
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border-light);
+}
+
+.loading-row:last-child {
+    border-bottom: none;
+}
+
+.loading-row .input {
+    width: 120px;
+    text-align: right;
+    font-family: var(--font-instrument);
+}
+
+/* Weight preview */
+.weight-preview {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 15px;
+}
+
+.weight-preview .font-mono {
+    font-size: 15px;
+}
+
+/* ========== Step 2: Route Entry ========== */
+
+.route-form {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.route-endpoints {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    gap: 12px;
+    align-items: end;
+}
+
+.route-endpoints .route-arrow {
+    font-size: 24px;
+    color: var(--text-muted);
+    padding-bottom: 8px;
+}
+
+.waypoint-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.waypoint-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 0;
+}
+
+.waypoint-row .input {
+    flex: 1;
+    max-width: 180px;
+}
+
+.waypoint-row .select {
+    width: 100px;
+}
+
+.waypoint-row .btn-remove {
+    padding: 6px 10px;
+    font-size: 18px;
+    min-width: 36px;
+    min-height: 36px;
+    color: var(--color-danger);
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+.route-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+/* Route table */
+.route-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+}
+
+.route-table th {
+    text-align: left;
+    padding: 8px 10px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-secondary);
+    border-bottom: 2px solid var(--border);
+}
+
+.route-table td {
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border-light);
+    font-family: var(--font-instrument);
+    font-size: 14px;
+}
+
+.route-table tr:last-child td {
+    border-bottom: none;
+}
+
+.route-table .total-row {
+    font-weight: 700;
+    border-top: 2px solid var(--border);
+}
+
+.route-table .total-row td {
+    padding-top: 10px;
+}
+
+.route-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 12px;
+    margin-top: 12px;
+}
+
+.route-summary-item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.route-summary-item .label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-secondary);
+}
+
+.route-summary-item .value {
+    font-family: var(--font-instrument);
+    font-size: 18px;
+    font-weight: 700;
+}
+
+/* Altitude selector */
+.altitude-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.altitude-row .select {
+    width: 140px;
+}
+
+/* Map container for mini route map */
+.route-map {
+    width: 100%;
+    height: 200px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--bg-surface);
+    overflow: hidden;
+}
+
+/* ========== Step 3: Weather ========== */
+
+.weather-stations {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.weather-station {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 10px;
+    border: 1px solid var(--border-light);
+    border-radius: 6px;
+}
+
+.weather-station .cat-dot {
+    margin-top: 4px;
+    flex-shrink: 0;
+}
+
+.weather-station-id {
+    font-family: var(--font-instrument);
+    font-weight: 700;
+    font-size: 15px;
+    min-width: 50px;
+}
+
+.weather-station-info {
+    flex: 1;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.weather-raw {
+    font-family: var(--font-instrument);
+    font-size: 12px;
+    color: var(--text-secondary);
+    word-break: break-all;
+    margin-top: 4px;
+}
+
+.weather-fetch-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 0;
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+.weather-section {
+    margin-bottom: 16px;
+}
+
+.weather-section-title {
+    font-size: 13px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-secondary);
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.weather-section-title .count {
+    background: var(--bg-surface);
+    padding: 1px 6px;
+    border-radius: 10px;
+    font-size: 11px;
+}
+
+/* Winds aloft table */
+.winds-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+.winds-table th {
+    text-align: left;
+    padding: 6px 8px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+    border-bottom: 1px solid var(--border);
+}
+
+.winds-table td {
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--border-light);
+    font-family: var(--font-instrument);
+}
+
+/* ========== Step 4: Weight & Balance ========== */
+
+.wb-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+}
+
+.wb-table th {
+    text-align: left;
+    padding: 8px 10px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-secondary);
+    border-bottom: 2px solid var(--border);
+}
+
+.wb-table td {
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border-light);
+    font-family: var(--font-instrument);
+}
+
+.wb-table .total-row {
+    font-weight: 700;
+    border-top: 2px solid var(--border);
+}
+
+.wb-result {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px;
+    border-radius: 8px;
+    font-size: 16px;
+    font-weight: 700;
+}
+
+.wb-result.in-envelope {
+    background: color-mix(in srgb, var(--color-success) 12%, transparent);
+    color: var(--color-success);
+    border: 1px solid var(--color-success);
+}
+
+.wb-result.out-of-envelope {
+    background: color-mix(in srgb, var(--color-danger) 12%, transparent);
+    color: var(--color-danger);
+    border: 1px solid var(--color-danger);
+}
+
+/* CG envelope chart */
+.cg-chart-container {
+    width: 100%;
+    max-width: 500px;
+    height: 300px;
+    margin: 12px auto;
+}
+
+/* ========== Step 5: Briefing ========== */
+
+.briefing-section {
+    margin-bottom: 16px;
+}
+
+.briefing-section-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.go-nogo-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 12px;
+    border-radius: 4px;
+    font-size: 13px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.go-nogo-badge.go {
+    background: var(--color-success);
+    color: #1a1a2e;
+}
+
+.go-nogo-badge.caution {
+    background: var(--color-caution);
+    color: #1a1a2e;
+}
+
+.go-nogo-badge.nogo {
+    background: var(--color-danger);
+    color: #ffffff;
+}
+
+.briefing-weather-passage {
+    font-size: 14px;
+    line-height: 1.6;
+}
+
+.briefing-weather-passage .waypoint-weather {
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border-light);
+}
+
+.briefing-weather-passage .waypoint-name {
+    font-weight: 700;
+    font-family: var(--font-instrument);
+}
+
+.briefing-weather-passage .waypoint-eta {
+    color: var(--text-secondary);
+    font-size: 12px;
+    margin-left: 8px;
+}
+
+.official-briefing {
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg-surface);
+}
+
+.official-briefing .confirmation-number {
+    font-family: var(--font-instrument);
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--accent);
+}
+
+/* AI briefing panel (Phase 2) */
+.ai-panel {
+    border: 1px solid var(--accent);
+    border-radius: 8px;
+    padding: 12px;
+    background: color-mix(in srgb, var(--accent) 5%, transparent);
+}
+
+.ai-panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.ai-disclaimer {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-style: italic;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border-light);
+}
+
+/* ========== Step 6: Ready / Filing ========== */
+
+.ready-checklist {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 16px;
+}
+
+.ready-checklist-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    font-size: 14px;
+    border-radius: 6px;
+}
+
+.ready-checklist-item.ok {
+    color: var(--color-success);
+}
+
+.ready-checklist-item.missing {
+    color: var(--text-muted);
+}
+
+.ready-checklist-item .check-icon {
+    font-size: 16px;
+    width: 20px;
+    text-align: center;
+}
+
+/* Filing form */
+.filing-form {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+}
+
+.filing-form .full-width {
+    grid-column: 1 / -1;
+}
+
+.filing-status {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px;
+    border-radius: 8px;
+    font-weight: 700;
+}
+
+.filing-status.filed {
+    background: color-mix(in srgb, var(--color-success) 12%, transparent);
+    color: var(--color-success);
+    border: 1px solid var(--color-success);
+}
+
+.filing-status .plan-id {
+    font-family: var(--font-instrument);
+    font-size: 16px;
+}
+
+/* Upload to Pi section */
+.upload-section {
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-surface);
+}
+
+.upload-section .progress-bar {
+    margin-top: 8px;
+}
+
+/* ========== Autocomplete Dropdown ========== */
+
+.autocomplete-dropdown {
+    position: absolute;
+    z-index: 100;
+    width: 100%;
+    max-height: 200px;
+    overflow-y: auto;
+    background: var(--bg-surface-raised);
+    border: 1px solid var(--border);
+    border-radius: 0 0 6px 6px;
+    box-shadow: var(--shadow);
+}
+
+.autocomplete-item {
+    padding: 8px 12px;
+    cursor: pointer;
+    font-size: 14px;
+    display: flex;
+    justify-content: space-between;
+    min-height: 40px;
+    align-items: center;
+}
+
+.autocomplete-item:hover,
+.autocomplete-item.highlighted {
+    background: var(--bg-surface);
+}
+
+.autocomplete-item .icao {
+    font-family: var(--font-instrument);
+    font-weight: 700;
+}
+
+.autocomplete-item .name {
+    color: var(--text-secondary);
+    font-size: 12px;
+    text-align: right;
+    max-width: 60%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* ========== Responsive: Two-column layout on wide screens ========== */
+
+@media (min-width: 900px) {
+    .step-two-col {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+    }
+
+    .step-two-col .card.full-width {
+        grid-column: 1 / -1;
+    }
+}
+
+/* ========== Dashboard (Phase 2) ========== */
+
+.dashboard-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    grid-template-rows: repeat(2, 1fr);
+    gap: 12px;
+    height: 100%;
+    min-height: 300px;
+}
+
+.dashboard-panel {
+    background: var(--bg-surface-raised);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+    cursor: pointer;
+    transition: border-color 0.2s, box-shadow 0.2s;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.dashboard-panel:active {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+.dashboard-panel-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+    flex-shrink: 0;
+}
+
+.dashboard-panel-num {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: #ffffff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 700;
+    flex-shrink: 0;
+}
+
+.dashboard-panel-title {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-secondary);
+}
+
+.dashboard-panel-body {
+    flex: 1;
+    overflow: hidden;
+    font-size: 14px;
+}
+
+@media (max-width: 900px) {
+    .dashboard-grid {
+        grid-template-columns: repeat(2, 1fr);
+        grid-template-rows: repeat(3, 1fr);
+    }
+}
+
+/* ========== Loading spinner ========== */
+
+.spinner {
+    display: inline-block;
+    width: 20px;
+    height: 20px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
