@@ -118,11 +118,18 @@
     <script src="./app.js"></script>
 
     <script>
-        // Service worker registration
+        // Disable service worker
         if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('./service-worker.js')
-                .then(reg => console.log('SW registered:', reg.scope))
-                .catch(err => console.error('SW registration failed:', err));
+            navigator.serviceWorker.getRegistrations().then(regs => {
+                regs.forEach(r => r.unregister());
+            });
+            caches.keys().then(keys => keys.forEach(k => caches.delete(k)));
+        }
+        // One-time DB reset to clear stale state from development
+        if (!localStorage.getItem('db-reset-v3')) {
+            indexedDB.deleteDatabase('pilotstation');
+            localStorage.setItem('db-reset-v3', '1');
+            location.reload();
         }
     </script>
 </body>

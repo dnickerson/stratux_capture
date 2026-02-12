@@ -149,6 +149,82 @@ class FlightPlanFiler {
         };
     }
 
+    /**
+     * Request a route recommendation from 1800wxbrief.
+     * Returns suggested route with airways and waypoints.
+     * @param {object} params - { departure, destination, altitude, aircraftType, flightRules }
+     * @returns {object} { success, routes: [{ route_string, description }], error }
+     */
+    static async requestRouteRecommendation(params) {
+        const body = {
+            type: 'route',
+            departure: params.departure,
+            destination: params.destination,
+            altitude: params.altitude || 5500,
+            aircraftType: params.aircraftType || '',
+            flightRules: params.flightRules || 'VFR',
+        };
+
+        try {
+            const resp = await fetch(`${FlightPlanFiler.WORKER_BASE}/route/recommend`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+            });
+
+            if (!resp.ok) {
+                const err = await resp.json().catch(() => ({ error: `HTTP ${resp.status}` }));
+                return { success: false, error: err.error || 'Route recommendation failed' };
+            }
+
+            const result = await resp.json();
+            return {
+                success: true,
+                routes: result.routes || [],
+            };
+        } catch (err) {
+            return { success: false, error: err.message || 'Network error' };
+        }
+    }
+
+    /**
+     * Parse a route string into waypoints array.
+     * Handles formats like: "KLKR DCT CLT V222 SAV DCT 7FL6"
+     * or "KLKR..CLT.V222.SAV..7FL6"
+     * @param {string} routeStr - Route string from 1800wxbrief or manual entry
+     * @returns {{ departure: string, destination: string, waypoints: Array }}
+     */
+    static parseRouteString(routeStr) {
+        if (!routeStr || !routeStr.trim()) return null;
+
+        // Normalize: replace ".." with " DCT ", "." with " ", multiple spaces with single
+        let normalized = routeStr.trim().toUpperCase()
+            .replace(/\.\./g, ' DCT ')
+            .replace(/\./g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+
+        const tokens = normalized.split(' ').filter(t => t && t !== 'DCT');
+        if (tokens.length < 2) return null;
+
+        const departure = tokens[0];
+        const destination = tokens[tokens.length - 1];
+        const waypoints = [];
+
+        // Determine which middle tokens are airways vs fixes
+        for (let i = 1; i < tokens.length - 1; i++) {
+            const token = tokens[i];
+            // Airways typically start with V, J, T, Q followed by digits
+            const isAirway = /^[VJTQ]\d+$/.test(token);
+            waypoints.push({
+                type: isAirway ? 'airway' : 'fix',
+                id: token,
+            });
+        }
+
+        return { departure, destination, waypoints };
+    }
+
     // ========== Internal ==========
 
     /**

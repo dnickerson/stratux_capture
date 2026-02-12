@@ -28,18 +28,16 @@ class ModeDetector extends EventTarget {
         if (typeof window !== 'undefined' && window.location.hostname === '192.168.10.1') {
             this._setMode(ModeDetector.MODES.COCKPIT);
         } else {
-            // Restore last mode from localStorage for instant startup (MODE-06)
-            const saved = localStorage.getItem('pilotstation-mode');
-            if (saved && Object.values(ModeDetector.MODES).includes(saved)) {
-                this._mode = saved;
-            } else {
-                this._mode = ModeDetector.MODES.PLANNING;
-            }
+            // Force planning mode when not on the Pi
+            this._mode = ModeDetector.MODES.PLANNING;
+            localStorage.setItem('pilotstation-mode', 'planning');
         }
 
-        // Start probing
-        this._probe();
-        this._probeTimer = setInterval(() => this._probe(), ModeDetector.REPROBE_INTERVAL);
+        // Only probe if on the Pi — skip probing on home WiFi to avoid mode flicker
+        if (typeof window !== 'undefined' && window.location.hostname === '192.168.10.1') {
+            this._probe();
+            this._probeTimer = setInterval(() => this._probe(), ModeDetector.REPROBE_INTERVAL);
+        }
 
         return this._mode;
     }
@@ -108,7 +106,13 @@ class ModeDetector extends EventTarget {
             return;
         }
 
-        // Both failed — offline
+        // Both probes failed — if browser reports online, stay in planning mode
+        // (Worker may not be deployed yet). Only go offline if truly disconnected.
+        if (typeof navigator !== 'undefined' && navigator.onLine) {
+            this._setMode(ModeDetector.MODES.PLANNING);
+            return;
+        }
+
         this._setMode(ModeDetector.MODES.OFFLINE);
     }
 

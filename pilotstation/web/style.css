@@ -87,16 +87,6 @@
 html {
     height: 100%;
     overflow: hidden;
-    /* Lock to landscape */
-    @media (orientation: portrait) {
-        transform: rotate(90deg);
-        transform-origin: left top;
-        width: 100vh;
-        height: 100vw;
-        position: absolute;
-        top: 100%;
-        left: 0;
-    }
 }
 
 body {

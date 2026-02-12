@@ -3,7 +3,7 @@
  * Dual-mode caching: cache-first for static, network-first for API.
  */
 
-const CACHE_NAME = 'pilotstation-v1';
+const CACHE_NAME = 'pilotstation-v2';
 
 const STATIC_ASSETS = [
     './',
