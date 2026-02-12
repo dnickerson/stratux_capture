@@ -6,7 +6,7 @@
 
 class NasrDB {
     static DB_NAME = 'pilotstation';
-    static DB_VERSION = 1;
+    static DB_VERSION = 2;
 
     constructor() {
         this._db = null;
@@ -44,6 +44,11 @@ class NasrDB {
                 if (!db.objectStoreNames.contains('airspace')) {
                     const store = db.createObjectStore('airspace', { keyPath: 'id' });
                     store.createIndex('class', 'class', { unique: false });
+                }
+
+                // Named fixes/waypoints for route parsing
+                if (!db.objectStoreNames.contains('fixes')) {
+                    db.createObjectStore('fixes', { keyPath: 'id' });
                 }
 
                 // Weather cache — keyed by station ICAO
@@ -342,7 +347,7 @@ class NasrDB {
     // ========== NASR Data Import ==========
 
     async importNasrBundle(bundle) {
-        // Bundle is an object with { airports, navaids, airways, airspace, cycle_info }
+        // Bundle is an object with { airports, navaids, airways, airspace, fixes, cycle_info }
         let count = 0;
         if (bundle.airports && bundle.airports.length) {
             await this._clear('airports');
@@ -360,11 +365,27 @@ class NasrDB {
             await this._clear('airspace');
             count += await this._bulkPut('airspace', bundle.airspace);
         }
+        if (bundle.fixes && bundle.fixes.length) {
+            await this._clear('fixes');
+            count += await this._bulkPut('fixes', bundle.fixes);
+        }
         if (bundle.cycle_info) {
             await this.setMeta('nasr_cycle_info', bundle.cycle_info);
         }
         await this.setMeta('nasr_last_import', new Date().toISOString());
         return count;
+    }
+
+    // ========== Fix Operations ==========
+
+    async getFix(id) {
+        return this._get('fixes', id.toUpperCase());
+    }
+
+    async searchFixes(query) {
+        const q = query.toUpperCase();
+        const all = await this._getAll('fixes');
+        return all.filter(f => f.id.startsWith(q)).slice(0, 20);
     }
 
     // ========== Static Utility: Haversine ==========

@@ -1,11 +1,11 @@
 """
-PilotStation — Pi-side FastAPI Stubs
-Minimal endpoints for Planning Mode sync only.
-Full backend is Phase 1b (separate effort).
+PilotStation — Pi-side FastAPI Server
+Serves aviation data (NASR, plates, CIFP) and flight plan sync.
 """
 
 import json
 import os
+import sqlite3
 from datetime import datetime
 from pathlib import Path
 
@@ -14,7 +14,6 @@ try:
     from fastapi.responses import JSONResponse, FileResponse
     from fastapi.staticfiles import StaticFiles
 except ImportError:
-    # Fallback: if FastAPI not installed, provide a minimal stub
     print("FastAPI not installed. Run: pip install fastapi uvicorn")
     raise
 
@@ -25,10 +24,13 @@ DATA_DIR = Path("/boot/firmware/pilotstation")
 AIRCRAFT_DIR = DATA_DIR / "aircraft"
 NASR_DIR = DATA_DIR / "nasr"
 PLANS_DIR = DATA_DIR / "plans"
+PLATES_DIR = DATA_DIR / "plates"
+CIFP_DIR = DATA_DIR / "cifp"
+TERRAIN_DIR = DATA_DIR / "terrain" / "srtm"
 WEB_DIR = Path(__file__).parent.parent / "web"
 
 # Ensure directories exist
-for d in [AIRCRAFT_DIR, NASR_DIR, PLANS_DIR]:
+for d in [AIRCRAFT_DIR, NASR_DIR, PLANS_DIR, PLATES_DIR, CIFP_DIR]:
     d.mkdir(parents=True, exist_ok=True)
 
 
@@ -142,7 +144,92 @@ async def get_aircraft(aircraft_id: str):
     )
 
 
+# ========== Approach Plates ==========
+
+@app.get("/api/plates/index")
+async def plates_index():
+    """Return the plate index (airport → plate list)."""
+    index_file = PLATES_DIR / "plate_index.json"
+    if index_file.exists():
+        return FileResponse(index_file, media_type="application/json")
+    return JSONResponse({"error": "No plate index available"}, status_code=404)
+
+
+@app.get("/api/plates/{icao}")
+async def plates_for_airport(icao: str):
+    """Return the list of plates for an airport."""
+    index_file = PLATES_DIR / "plate_index.json"
+    if not index_file.exists():
+        return JSONResponse({"error": "No plate index"}, status_code=404)
+    index = json.loads(index_file.read_text())
+    data = index.get(icao.upper())
+    if data:
+        return data
+    return JSONResponse({"error": f"No plates for {icao}"}, status_code=404)
+
+
+@app.get("/api/plates/{icao}/{filename}")
+async def plate_pdf(icao: str, filename: str):
+    """Serve a single approach plate PDF."""
+    pdf_path = PLATES_DIR / icao.upper() / filename
+    if pdf_path.exists() and pdf_path.suffix == ".pdf":
+        return FileResponse(pdf_path, media_type="application/pdf")
+    return JSONResponse({"error": "Plate not found"}, status_code=404)
+
+
+# ========== CIFP Procedures ==========
+
+@app.get("/api/cifp/{icao}")
+async def cifp_procedures(icao: str):
+    """Return SID/STAR/Approach procedures for an airport."""
+    db_path = CIFP_DIR / "cifp.db"
+    if not db_path.exists():
+        return JSONResponse({"error": "No CIFP database"}, status_code=404)
+
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
+    cursor = conn.execute(
+        "SELECT proc_type, proc_name, COUNT(*) as steps "
+        "FROM procedures WHERE airport_icao = ? "
+        "GROUP BY proc_type, proc_name ORDER BY proc_type, proc_name",
+        (icao.upper(),),
+    )
+    results = [dict(row) for row in cursor]
+    conn.close()
+
+    if not results:
+        return JSONResponse({"error": f"No procedures for {icao}"}, status_code=404)
+    return {"icao": icao.upper(), "procedures": results}
+
+
+@app.get("/api/cifp/{icao}/{proc_name}")
+async def cifp_procedure_detail(icao: str, proc_name: str):
+    """Return the full waypoint sequence for a procedure."""
+    db_path = CIFP_DIR / "cifp.db"
+    if not db_path.exists():
+        return JSONResponse({"error": "No CIFP database"}, status_code=404)
+
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
+    cursor = conn.execute(
+        "SELECT * FROM procedures WHERE airport_icao = ? AND proc_name = ? "
+        "ORDER BY transition, seq_num",
+        (icao.upper(), proc_name.upper()),
+    )
+    results = [dict(row) for row in cursor]
+    conn.close()
+
+    if not results:
+        return JSONResponse({"error": "Procedure not found"}, status_code=404)
+    return {"icao": icao.upper(), "proc_name": proc_name.upper(), "steps": results}
+
+
 # ========== Static File Serving ==========
+
+# Serve chart tiles as static files (if available)
+TILES_DIR = DATA_DIR / "tiles"
+if TILES_DIR.exists():
+    app.mount("/tiles", StaticFiles(directory=str(TILES_DIR)), name="tiles")
 
 # Serve the PWA static files (must be last to not shadow API routes)
 if WEB_DIR.exists():
