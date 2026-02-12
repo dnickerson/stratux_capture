@@ -103,7 +103,7 @@ class ReadyStep {
                     <span class="text-muted">|</span>
                     <span class="font-mono">ETE ${eteStr}</span>
                     <span class="text-muted">|</span>
-                    <span class="font-mono">Fuel ${(route.totalFuel || 0).toFixed(1)}/${fuelOnBoard.toFixed(1)}gal</span>
+                    <span class="font-mono">Fuel ${(route.totalFuel || 0).toFixed(1)}/${fuelOnBoard.toFixed(1)}gal${route.phaseFuel ? ` (T${route.phaseFuel.taxi.gal.toFixed(1)}+C${route.phaseFuel.climb.gal.toFixed(1)}+R${route.phaseFuel.cruise.gal.toFixed(1)}+D${route.phaseFuel.descent.gal.toFixed(1)})` : ''}</span>
                     <span class="text-muted">|</span>
                     <span class="font-mono" style="${reserveMin < 45 ? 'color:var(--color-warning);font-weight:600;' : ''}">Rsv ${reserve.toFixed(1)}gal (${Math.round(reserveMin)}min)</span>
                     ${wb.takeoff_weight ? `<span class="text-muted">|</span><span class="font-mono">${wb.takeoff_weight}lb ${wb.in_envelope ? 'IN ENV' : '<span style="color:var(--color-danger);">OUT OF ENV</span>'}</span>` : ''}

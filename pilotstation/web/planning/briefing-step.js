@@ -277,7 +277,8 @@ class BriefingStep {
         // Fuel check
         if (routeData.totalFuel && acData?.loading?.fuel_gal) {
             const reserve = acData.loading.fuel_gal - routeData.totalFuel;
-            const reserveMin = (reserve / 8.2) * 60; // minutes
+            const burnRate = acData?.aircraft?.fuel_burn_gph || 7.0;
+            const reserveMin = (reserve / burnRate) * 60; // minutes
             if (reserve < 0) {
                 reasons.push({ severity: 'nogo', message: `Insufficient fuel: need ${routeData.totalFuel.toFixed(1)} gal, have ${acData.loading.fuel_gal.toFixed(1)} gal` });
                 worstStatus = 'NO-GO';

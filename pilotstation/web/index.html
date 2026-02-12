@@ -126,9 +126,9 @@
             caches.keys().then(keys => keys.forEach(k => caches.delete(k)));
         }
         // One-time DB reset to clear stale state from development
-        if (!localStorage.getItem('db-reset-v3')) {
+        if (!localStorage.getItem('db-reset-v4')) {
             indexedDB.deleteDatabase('pilotstation');
-            localStorage.setItem('db-reset-v3', '1');
+            localStorage.setItem('db-reset-v4', '1');
             location.reload();
         }
     </script>

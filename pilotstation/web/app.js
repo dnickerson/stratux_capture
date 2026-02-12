@@ -348,11 +348,21 @@ async function loadSampleAircraft() {
         empty_weight: 1185,
         empty_cg: 76.34,
         max_gross_weight: 1800,
-        cruise_tas: 155,
-        fuel_burn_gph: 7.0,
+        cruise_ias: 140,   // indicated airspeed at cruise power (TAS computed from altitude + temp)
+        fuel_burn_gph: 7.0, // overall average fallback
         fuel: {
             capacity_gal: 36,
             usable_gal: 36,
+        },
+        // Lycoming O-360-A1A phase-of-flight fuel data
+        // Source: Lycoming operator's manual power chart + typical RV-9A ops
+        // These defaults will be refined by actual engine monitor data over time
+        fuel_phases: {
+            source: 'lycoming_chart', // 'lycoming_chart' | 'actual_data'
+            taxi:    { gph: 1.5, time_min: 10 },                       // idle ~1000-1200 RPM
+            climb:   { gph: 10.0, ias_kt: 120, rate_fpm: 700 },        // full rich, 75% power, 120 KIAS
+            cruise:  { gph: 7.0 },                                     // 65% power, leaned (cruise_ias used for speed)
+            descent: { gph: 4.0, ias_kt: 120, rate_fpm: 500 },         // reduced power
         },
         stations: [
             { name: 'Pilot', arm: 92.7, min: 0, max: 300, fuel: false },
@@ -390,7 +400,7 @@ async function loadSeedAirports() {
 
     const airports = [
         // Major US airports + common GA airports
-        { icao: 'KATL', name: 'Hartsfield-Jackson Atlanta Intl', lat: 33.6407, lon: -84.4277 },
+        { icao: 'KATL', name: 'Hartsfield-Jackson Atlanta Intl', lat: 33.6407, lon: -84.4277, elev_ft: 1026 },
         { icao: 'KORD', name: 'Chicago O\'Hare Intl', lat: 41.9742, lon: -87.9073 },
         { icao: 'KDFW', name: 'Dallas/Fort Worth Intl', lat: 32.8998, lon: -97.0403 },
         { icao: 'KDEN', name: 'Denver Intl', lat: 39.8561, lon: -104.6737 },
@@ -412,7 +422,7 @@ async function loadSeedAirports() {
         { icao: 'KSAT', name: 'San Antonio Intl', lat: 29.5337, lon: -98.4698 },
         { icao: 'KMSY', name: 'New Orleans Louis Armstrong', lat: 29.9934, lon: -90.2580 },
         { icao: 'KBNA', name: 'Nashville Intl', lat: 36.1245, lon: -86.6782 },
-        { icao: 'KCLT', name: 'Charlotte Douglas Intl', lat: 35.2140, lon: -80.9431 },
+        { icao: 'KCLT', name: 'Charlotte Douglas Intl', lat: 35.2140, lon: -80.9431, elev_ft: 748 },
         { icao: 'KRDU', name: 'Raleigh-Durham Intl', lat: 35.8776, lon: -78.7875 },
         { icao: 'KMDW', name: 'Chicago Midway Intl', lat: 41.7868, lon: -87.7522 },
         { icao: 'KHOU', name: 'William P Hobby', lat: 29.6454, lon: -95.2789 },
@@ -433,15 +443,15 @@ async function loadSeedAirports() {
         { icao: 'KCHA', name: 'Chattanooga Metropolitan', lat: 35.0353, lon: -85.2038 },
         { icao: 'KHSV', name: 'Huntsville Intl', lat: 34.6372, lon: -86.7751 },
         { icao: 'KBHM', name: 'Birmingham-Shuttlesworth Intl', lat: 33.5629, lon: -86.7535 },
-        { icao: 'KJAX', name: 'Jacksonville Intl', lat: 30.4941, lon: -81.6879 },
-        { icao: 'KSAV', name: 'Savannah/Hilton Head Intl', lat: 32.1276, lon: -81.2021 },
-        { icao: 'KCAE', name: 'Columbia Metropolitan', lat: 33.9388, lon: -81.1195 },
-        { icao: 'KSSI', name: 'Malcolm McKinnon', lat: 31.1518, lon: -81.3913 },
-        { icao: 'KCHS', name: 'Charleston Intl', lat: 32.8986, lon: -80.0405 },
+        { icao: 'KJAX', name: 'Jacksonville Intl', lat: 30.4941, lon: -81.6879, elev_ft: 30 },
+        { icao: 'KSAV', name: 'Savannah/Hilton Head Intl', lat: 32.1276, lon: -81.2021, elev_ft: 50 },
+        { icao: 'KCAE', name: 'Columbia Metropolitan', lat: 33.9388, lon: -81.1195, elev_ft: 236 },
+        { icao: 'KSSI', name: 'Malcolm McKinnon', lat: 31.1518, lon: -81.3913, elev_ft: 19 },
+        { icao: 'KCHS', name: 'Charleston Intl', lat: 32.8986, lon: -80.0405, elev_ft: 46 },
         { icao: 'KGSW', name: 'Greater Southwest Intl', lat: 32.6867, lon: -97.0528 },
-        // User's airports
-        { icao: 'KLKR', name: 'Lancaster County McWhirter Field', lat: 34.7229, lon: -80.8546 },
-        { icao: '7FL6', name: 'Spruce Creek Airport', lat: 29.0748, lon: -81.0413 },
+        // User's airports (with field elevations for phase-of-flight fuel calc)
+        { icao: 'KLKR', name: 'Lancaster County McWhirter Field', lat: 34.7229, lon: -80.8546, elev_ft: 489 },
+        { icao: '7FL6', name: 'Spruce Creek Airport', lat: 29.0748, lon: -81.0413, elev_ft: 24 },
         // Common GA airports (Oklahoma / Texas / South Central)
         { icao: 'KPWA', name: 'Wiley Post Airport', lat: 35.5342, lon: -97.6471 },
         { icao: 'KRCE', name: 'Clarence E Page Municipal', lat: 35.4887, lon: -97.8226 },

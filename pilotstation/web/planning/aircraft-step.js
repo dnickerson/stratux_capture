@@ -116,6 +116,11 @@ class AircraftStep {
             </div>
 
             <div class="card">
+                <div class="card-title">Fuel Phases — ${ac.fuel_phases?.source === 'actual_data' ? 'Engine Monitor Data' : 'Lycoming O-360-A1A Chart'}</div>
+                ${this._renderFuelPhases(ac)}
+            </div>
+
+            <div class="card">
                 <div class="card-title">Weight Preview</div>
                 <div class="weight-preview">
                     <div class="flex justify-between">
@@ -172,7 +177,146 @@ class AircraftStep {
             });
         }
 
+        // Fuel phase inputs
+        this.container.querySelectorAll('.phase-input').forEach(input => {
+            input.addEventListener('change', (e) => {
+                const phase = e.target.dataset.phase;
+                const field = e.target.dataset.field;
+                const val = parseFloat(e.target.value) || 0;
+                this._updatePhaseValue(phase, field, val);
+            });
+        });
+
+        // Cruise IAS input (stored on the profile, not in fuel_phases)
+        const cruiseIasInput = this.container.querySelector('.cruise-ias-input');
+        if (cruiseIasInput) {
+            cruiseIasInput.addEventListener('change', async (e) => {
+                const val = parseFloat(e.target.value) || 140;
+                this.selectedProfile.cruise_ias = val;
+                await this.db.saveAircraftProfile(this.selectedProfile);
+                this._notifyChange();
+            });
+        }
+
         this._updatePreview();
+    }
+
+    async _updatePhaseValue(phase, field, value) {
+        if (!this.selectedProfile) return;
+        if (!this.selectedProfile.fuel_phases) {
+            this.selectedProfile.fuel_phases = {
+                source: 'lycoming_chart',
+                taxi: { gph: 1.5, time_min: 10 },
+                climb: { gph: 10.0, ias_kt: 120, rate_fpm: 700 },
+                cruise: { gph: 7.0 },
+                descent: { gph: 4.0, ias_kt: 120, rate_fpm: 500 },
+            };
+        }
+        if (!this.selectedProfile.fuel_phases[phase]) {
+            this.selectedProfile.fuel_phases[phase] = {};
+        }
+        this.selectedProfile.fuel_phases[phase][field] = value;
+
+        // Keep fuel_burn_gph in sync with cruise GPH
+        if (phase === 'cruise' && field === 'gph') {
+            this.selectedProfile.fuel_burn_gph = value;
+        }
+
+        // Persist to IndexedDB
+        await this.db.saveAircraftProfile(this.selectedProfile);
+        this._notifyChange();
+    }
+
+    _renderFuelPhases(ac) {
+        const fp = ac.fuel_phases || {};
+        const taxi = fp.taxi || {};
+        const climb = fp.climb || {};
+        const cruise = fp.cruise || {};
+        const descent = fp.descent || {};
+
+        return `
+            <table style="width:100%;border-collapse:collapse;">
+                <thead>
+                    <tr class="text-sm text-muted" style="text-align:left;">
+                        <th style="padding:4px 8px;">Phase</th>
+                        <th style="padding:4px 8px;">GPH</th>
+                        <th style="padding:4px 8px;">IAS (kt)</th>
+                        <th style="padding:4px 8px;">Rate (fpm)</th>
+                        <th style="padding:4px 8px;">Time (min)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr style="border-top:1px solid var(--border);">
+                        <td style="padding:4px 8px;" class="text-sm">Taxi</td>
+                        <td style="padding:4px 8px;">
+                            <input type="number" class="input phase-input" data-phase="taxi" data-field="gph"
+                                value="${taxi.gph ?? 1.5}" min="0" max="20" step="0.1" inputmode="decimal"
+                                style="width:70px;">
+                        </td>
+                        <td style="padding:4px 8px;" class="text-muted text-sm">—</td>
+                        <td style="padding:4px 8px;" class="text-muted text-sm">—</td>
+                        <td style="padding:4px 8px;">
+                            <input type="number" class="input phase-input" data-phase="taxi" data-field="time_min"
+                                value="${taxi.time_min ?? 10}" min="0" max="60" step="1" inputmode="numeric"
+                                style="width:70px;">
+                        </td>
+                    </tr>
+                    <tr style="border-top:1px solid var(--border);">
+                        <td style="padding:4px 8px;" class="text-sm">Climb</td>
+                        <td style="padding:4px 8px;">
+                            <input type="number" class="input phase-input" data-phase="climb" data-field="gph"
+                                value="${climb.gph ?? 10.0}" min="0" max="25" step="0.1" inputmode="decimal"
+                                style="width:70px;">
+                        </td>
+                        <td style="padding:4px 8px;">
+                            <input type="number" class="input phase-input" data-phase="climb" data-field="ias_kt"
+                                value="${climb.ias_kt ?? 120}" min="50" max="200" step="1" inputmode="numeric"
+                                style="width:70px;">
+                        </td>
+                        <td style="padding:4px 8px;">
+                            <input type="number" class="input phase-input" data-phase="climb" data-field="rate_fpm"
+                                value="${climb.rate_fpm ?? 700}" min="100" max="3000" step="50" inputmode="numeric"
+                                style="width:70px;">
+                        </td>
+                        <td style="padding:4px 8px;" class="text-muted text-sm">calc</td>
+                    </tr>
+                    <tr style="border-top:1px solid var(--border);">
+                        <td style="padding:4px 8px;" class="text-sm">Cruise</td>
+                        <td style="padding:4px 8px;">
+                            <input type="number" class="input phase-input" data-phase="cruise" data-field="gph"
+                                value="${cruise.gph ?? 7.0}" min="0" max="25" step="0.1" inputmode="decimal"
+                                style="width:70px;">
+                        </td>
+                        <td style="padding:4px 8px;">
+                            <input type="number" class="input cruise-ias-input"
+                                value="${ac.cruise_ias || 140}" min="50" max="250" step="1" inputmode="numeric"
+                                style="width:70px;">
+                        </td>
+                        <td style="padding:4px 8px;" class="text-muted text-sm">—</td>
+                        <td style="padding:4px 8px;" class="text-muted text-sm">calc</td>
+                    </tr>
+                    <tr style="border-top:1px solid var(--border);">
+                        <td style="padding:4px 8px;" class="text-sm">Descent</td>
+                        <td style="padding:4px 8px;">
+                            <input type="number" class="input phase-input" data-phase="descent" data-field="gph"
+                                value="${descent.gph ?? 4.0}" min="0" max="25" step="0.1" inputmode="decimal"
+                                style="width:70px;">
+                        </td>
+                        <td style="padding:4px 8px;">
+                            <input type="number" class="input phase-input" data-phase="descent" data-field="ias_kt"
+                                value="${descent.ias_kt ?? 120}" min="50" max="200" step="1" inputmode="numeric"
+                                style="width:70px;">
+                        </td>
+                        <td style="padding:4px 8px;">
+                            <input type="number" class="input phase-input" data-phase="descent" data-field="rate_fpm"
+                                value="${descent.rate_fpm ?? 500}" min="100" max="3000" step="50" inputmode="numeric"
+                                style="width:70px;">
+                        </td>
+                        <td style="padding:4px 8px;" class="text-muted text-sm">calc</td>
+                    </tr>
+                </tbody>
+            </table>
+        `;
     }
 
     _updatePreview() {
