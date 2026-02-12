@@ -47,7 +47,8 @@ SECTIONAL_URL_TEMPLATE = f"https://aeronav.faa.gov/visual/{CHART_CYCLE_DATE}/sec
 
 DTPP_VOLUMES = ["A", "B", "C", "D", "E"]
 DTPP_URL_TEMPLATE = f"https://aeronav.faa.gov/upload_313-d/terminal/DDTPP{{vol}}_{DTPP_CYCLE_CODE}.zip"
-DTPP_META_URL = f"https://aeronav.faa.gov/d-tpp/{DTPP_CYCLE_CODE}/xml_data/d-TPP_Metafile.xml"
+DTPP_META_CYCLE = DTPP_CYCLE_CODE[:4]  # 2601 (4-digit for metafile URL)
+DTPP_META_URL = f"https://aeronav.faa.gov/d-tpp/{DTPP_META_CYCLE}/xml_data/d-TPP_Metafile.xml"
 
 CIFP_URL = f"https://aeronav.faa.gov/Upload_313-d/cifp/CIFP_{CIFP_CYCLE_CODE}.zip"
 
