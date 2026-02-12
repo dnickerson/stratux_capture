@@ -138,10 +138,10 @@ export default {
                 let targetPath;
 
                 if (path === '/briefing') {
-                    targetPath = '/Website/briefing';
+                    targetPath = '/Website/rest/FP/routeBriefing';
                 } else {
                     // /fp/file, /fp/{id}/amend, /fp/{id}/cancel, /fp/{id}/close
-                    targetPath = '/Website/FP' + path.replace('/fp', '');
+                    targetPath = '/Website/rest/FP' + path.replace('/fp', '');
                 }
 
                 const targetUrl = `https://lmfsweb.afss.com${targetPath}`;

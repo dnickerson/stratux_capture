@@ -669,10 +669,9 @@ class RouteStep {
         const midLat = (dep.lat + dest.lat) / 2;
         const midLon = (dep.lon + dest.lon) / 2;
 
-        // Fetch FD winds aloft text from aviationweather.gov
+        // Fetch FD winds aloft text via Cloudflare Worker proxy (CORS-safe)
         try {
-            // Use local dev server proxy to avoid CORS issues with text/plain FD data
-            const url = `${location.origin}/api/windtemp?region=all&level=low&fcst=06`;
+            const url = `${FlightPlanFiler.WORKER_BASE}/wx/windtemp?region=all&level=low&fcst=06`;
             console.log('Fetching FD winds from:', url);
             const resp = await fetch(url, { cache: 'no-store' });
             console.log('FD response status:', resp.status, resp.statusText);

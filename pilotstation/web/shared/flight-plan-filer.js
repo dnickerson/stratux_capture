@@ -3,10 +3,14 @@
  * 1800wxbrief (Leidos) client for filing, amending, cancelling flight plans
  * and requesting official weather briefings.
  * FILE-04 through FILE-11, PLAN-16 through PLAN-18
+ *
+ * Leidos REST API docs: https://lmfswebservices.atlassian.net/wiki/spaces/WSS/overview
+ * Base URL: https://lmfsweb.afss.com/Website/rest/FP/...
+ * Auth: HTTP Basic (Vendor_ID:Vendor_Password) — proxied via Cloudflare Worker
  */
 
 class FlightPlanFiler {
-    static WORKER_BASE = 'https://pilotstation-api.workers.dev';
+    static WORKER_BASE = 'https://pilotstation-api.pilotstation.workers.dev';
 
     /**
      * Equipment suffix lookup table (common suffixes).
@@ -38,14 +42,18 @@ class FlightPlanFiler {
 
         if (!resp.ok) {
             const err = await resp.json().catch(() => ({ error: `HTTP ${resp.status}` }));
-            return { success: false, error: err.error || 'Filing failed' };
+            return { success: false, error: err.returnMessage || err.error || 'Filing failed' };
         }
 
         const result = await resp.json();
+        if (result.returnStatus === false) {
+            return { success: false, error: result.returnMessage || 'Filing rejected by Leidos' };
+        }
+
         return {
             success: true,
-            flight_identifier: result.flightIdentifier || result.flight_identifier || null,
-            version_stamp: result.versionStamp || result.version_stamp || null,
+            flight_identifier: result.flightIdentifier || null,
+            version_stamp: result.versionStamp || null,
         };
     }
 
@@ -64,13 +72,17 @@ class FlightPlanFiler {
 
         if (!resp.ok) {
             const err = await resp.json().catch(() => ({ error: `HTTP ${resp.status}` }));
-            return { success: false, error: err.error || 'Amendment failed' };
+            return { success: false, error: err.returnMessage || err.error || 'Amendment failed' };
         }
 
         const result = await resp.json();
+        if (result.returnStatus === false) {
+            return { success: false, error: result.returnMessage || 'Amendment rejected' };
+        }
+
         return {
             success: true,
-            version_stamp: result.versionStamp || result.version_stamp || null,
+            version_stamp: result.versionStamp || null,
         };
     }
 
@@ -88,7 +100,12 @@ class FlightPlanFiler {
 
         if (!resp.ok) {
             const err = await resp.json().catch(() => ({ error: `HTTP ${resp.status}` }));
-            return { success: false, error: err.error || 'Cancellation failed' };
+            return { success: false, error: err.returnMessage || err.error || 'Cancellation failed' };
+        }
+
+        const result = await resp.json();
+        if (result.returnStatus === false) {
+            return { success: false, error: result.returnMessage || 'Cancellation rejected' };
         }
 
         return { success: true };
@@ -108,26 +125,44 @@ class FlightPlanFiler {
 
         if (!resp.ok) {
             const err = await resp.json().catch(() => ({ error: `HTTP ${resp.status}` }));
-            return { success: false, error: err.error || 'Close failed' };
+            return { success: false, error: err.returnMessage || err.error || 'Close failed' };
+        }
+
+        const result = await resp.json();
+        if (result.returnStatus === false) {
+            return { success: false, error: result.returnMessage || 'Close rejected' };
         }
 
         return { success: true };
     }
 
     /**
-     * Request an official weather briefing via 1800wxbrief.
+     * Request an official weather briefing via 1800wxbrief routeBriefing endpoint.
+     * Returns a logged FAA weather briefing with confirmation number.
      * @param {object} briefingParams - Route, altitude, departure time, etc.
      * @returns {object} { success, confirmation, briefing_text, error }
      */
     static async requestBriefing(briefingParams) {
-        const body = {
-            type: briefingParams.type || 'standard',
-            departure: briefingParams.departure,
-            destination: briefingParams.destination,
-            route: briefingParams.route || '',
-            altitude: briefingParams.altitude,
-            departureTime: briefingParams.departureTime || new Date().toISOString(),
+        // Build a NAS flight plan block for the briefing request
+        const nasFlightPlan = {
+            type: briefingParams.flightRules || 'VFR',
+            aircraftIdentification: briefingParams.aircraftId || '',
             aircraftType: briefingParams.aircraftType || '',
+            trueAirspeed: String(briefingParams.trueAirspeed || '130'),
+            departurePoint: briefingParams.departure,
+            departureTime: briefingParams.departureTime || '',
+            cruisingAltitude: FlightPlanFiler._formatAltitude(briefingParams.altitude),
+            route: briefingParams.route || '',
+            destination: briefingParams.destination,
+        };
+
+        const body = {
+            type: 'DOMESTIC',
+            notABriefing: false,
+            briefingType: (briefingParams.type || 'STANDARD').toUpperCase(),
+            briefingResultFormat: 'NGBV2',
+            routeCorridorWidth: '25',
+            nasFlightPlan,
         };
 
         const resp = await fetch(`${FlightPlanFiler.WORKER_BASE}/briefing`, {
@@ -138,10 +173,14 @@ class FlightPlanFiler {
 
         if (!resp.ok) {
             const err = await resp.json().catch(() => ({ error: `HTTP ${resp.status}` }));
-            return { success: false, error: err.error || 'Briefing request failed' };
+            return { success: false, error: err.returnMessage || err.error || 'Briefing request failed' };
         }
 
         const result = await resp.json();
+        if (result.returnStatus === false) {
+            return { success: false, error: result.returnMessage || 'Briefing request rejected' };
+        }
+
         return {
             success: true,
             confirmation: result.confirmationNumber || result.confirmation || null,
@@ -228,46 +267,61 @@ class FlightPlanFiler {
     // ========== Internal ==========
 
     /**
-     * Build the 1800wxbrief flight plan filing payload.
-     * Maps internal model fields to Leidos API format.
+     * Build the 1800wxbrief NAS (domestic) flight plan filing payload.
+     * Maps internal model fields to Leidos REST API schema.
      */
     static _buildFilingPayload(planData, pilotInfo) {
         const fp = planData.flight_plan || planData;
         const filed = planData.filed_plan || {};
         const ac = planData.aircraft || {};
+        const loading = planData.loading || {};
 
-        // Build route string from waypoints
+        // Build route string from waypoints (skip departure/destination)
         let routeString = '';
         if (fp.route && Array.isArray(fp.route)) {
-            // Skip departure and destination (first and last), they go in separate fields
             routeString = fp.route.slice(1, -1).join(' ');
         }
 
+        // Combine aircraft type with equipment suffix (e.g., "C172/G")
+        const typeCode = ac.type_code || ac.name || '';
+        const suffix = filed.equipment_suffix || '/G';
+        const aircraftType = typeCode + suffix;
+
         return {
-            flightRules: filed.flight_rules || 'VFR',
-            aircraftType: ac.type_code || ac.name || '',
-            aircraftId: ac.tail_number || '',
-            departurePoint: fp.departure || '',
-            destination: fp.destination || '',
-            route: routeString,
-            cruisingAltitude: fp.altitude || '',
-            trueAirspeed: ac.cruise_tas || '130',
-            proposedDepartureTime: filed.proposed_departure || '',
-            estimatedTimeEnroute: FlightPlanFiler._formatEte(fp.legs),
-            fuelOnBoard: FlightPlanFiler._formatFuelEndurance(planData),
-            peopleOnBoard: filed.people_on_board || 1,
-            alternateAirport: filed.alternate || '',
-            pilotName: pilotInfo?.name || '',
-            pilotPhone: pilotInfo?.phone || '',
-            pilotAddress: pilotInfo?.address || '',
-            aircraftColor: ac.color || '',
-            remarks: filed.remarks || '',
-            equipmentSuffix: filed.equipment_suffix || '/G',
+            type: 'DOMESTIC',
+            nasFlightPlan: {
+                type: filed.flight_rules || 'VFR',
+                aircraftIdentification: ac.tail_number || '',
+                aircraftType: aircraftType,
+                trueAirspeed: String(ac.cruise_tas || '130'),
+                departurePoint: fp.departure || '',
+                departureTime: filed.proposed_departure || '',
+                cruisingAltitude: FlightPlanFiler._formatAltitude(fp.altitude),
+                route: routeString || 'DCT',
+                destination: fp.destination || '',
+                estimatedTimeEnroute: FlightPlanFiler._formatEte(fp.legs),
+                remarks: filed.remarks || '',
+                fuelOnBoard: FlightPlanFiler._formatFuelEndurance(loading, ac),
+                alternate: filed.alternate || '',
+                pilotInCommand: pilotInfo?.name || '',
+                numberAboard: String(filed.people_on_board || 1),
+                colorOfAircraft: ac.color || '',
+                contactPhone: pilotInfo?.phone || '',
+            },
         };
     }
 
     /**
-     * Format ETE from legs array as HH:MM.
+     * Format altitude for filing: hundreds of feet, 3 digits (e.g., 5500 → "055").
+     */
+    static _formatAltitude(altFt) {
+        if (!altFt) return '';
+        const hundreds = Math.round(altFt / 100);
+        return String(hundreds).padStart(3, '0');
+    }
+
+    /**
+     * Format ETE from legs array as HHMM.
      */
     static _formatEte(legs) {
         if (!legs || !Array.isArray(legs)) return '';
@@ -278,13 +332,13 @@ class FlightPlanFiler {
     }
 
     /**
-     * Format fuel endurance as HH:MM.
+     * Format fuel endurance as HHMM.
+     * Uses aircraft profile burn rate when available.
      */
-    static _formatFuelEndurance(planData) {
-        const loading = planData.loading || planData.aircraft?.loading || {};
+    static _formatFuelEndurance(loading, aircraft) {
         const fuelGal = loading.fuel_gal || 0;
-        // Rough estimate: fuel_gal / burn_rate_gph
-        const burnRate = 8.2; // Default
+        const burnRate = aircraft.fuel_burn_gph || 8.0;
+        if (fuelGal <= 0 || burnRate <= 0) return '';
         const enduranceMin = (fuelGal / burnRate) * 60;
         const h = Math.floor(enduranceMin / 60);
         const m = Math.round(enduranceMin % 60);

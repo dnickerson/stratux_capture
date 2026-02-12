@@ -7,7 +7,7 @@
 class ModeDetector extends EventTarget {
     static MODES = { PLANNING: 'planning', COCKPIT: 'cockpit', OFFLINE: 'offline' };
     static PI_URL = 'http://192.168.10.1/api/status';
-    static WORKER_URL = 'https://pilotstation-api.workers.dev/health';
+    static WORKER_URL = 'https://pilotstation-api.pilotstation.workers.dev/health';
     static PROBE_TIMEOUT = 2000;
     static REPROBE_INTERVAL = 30000;
     static OVERRIDE_DURATION = 300000; // 5 minutes
