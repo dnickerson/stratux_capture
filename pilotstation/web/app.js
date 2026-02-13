@@ -127,6 +127,23 @@ class PilotStationApp {
             });
         }
         this.workflowController.activate();
+
+        // Ensure NASR data is loaded (fetches from flywhere.app if needed)
+        this._ensureNasrData();
+    }
+
+    async _ensureNasrData() {
+        try {
+            const db = new NasrDB();
+            await db.open();
+            const cycle = await db.getCycleInfo();
+            if (cycle) return; // Already have NASR data
+
+            const sync = new SyncManager(db);
+            await sync._syncNasrData();
+        } catch (err) {
+            console.warn('NASR data load:', err);
+        }
     }
 
     _onPlanningStepChange(stepNum) {
@@ -353,6 +370,13 @@ async function loadSampleAircraft() {
         fuel: {
             capacity_gal: 36,
             usable_gal: 36,
+        },
+        // Tic mark to gallons polynomial (5th degree, per-tank)
+        // Calibrated from fuel_tracking_app sight gauge measurements
+        tic_polynomial: {
+            coefficients: { a5: 0.00073877, a4: -0.021782, a3: 0.22914, a2: -1.0819, a1: 3.7826, a0: 2.2368 },
+            max_tic: 13,
+            fuel_capacity_gal: 36,
         },
         // Lycoming O-360-A1A phase-of-flight fuel data
         // Source: Lycoming operator's manual power chart + typical RV-9A ops

@@ -99,6 +99,7 @@
     <script src="./shared/flight-plan-model.js"></script>
     <script src="./shared/weather-client.js"></script>
     <script src="./shared/wb-calculator.js"></script>
+    <script src="./shared/fuel-engine.js"></script>
     <script src="./shared/flight-plan-filer.js"></script>
     <script src="./shared/sync-manager.js"></script>
     <script src="./shared/ai-client.js"></script>
@@ -126,9 +127,9 @@
             caches.keys().then(keys => keys.forEach(k => caches.delete(k)));
         }
         // One-time DB reset to clear stale state from development
-        if (!localStorage.getItem('db-reset-v4')) {
+        if (!localStorage.getItem('db-reset-v5')) {
             indexedDB.deleteDatabase('pilotstation');
-            localStorage.setItem('db-reset-v4', '1');
+            localStorage.setItem('db-reset-v5', '1');
             location.reload();
         }
     </script>

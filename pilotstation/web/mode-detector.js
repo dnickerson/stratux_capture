@@ -7,7 +7,7 @@
 class ModeDetector extends EventTarget {
     static MODES = { PLANNING: 'planning', COCKPIT: 'cockpit', OFFLINE: 'offline' };
     static PI_URL = 'http://192.168.10.1/api/status';
-    static WORKER_URL = 'https://pilotstation-api.pilotstation.workers.dev/health';
+    static HEALTH_URL = '/api/health';
     static PROBE_TIMEOUT = 2000;
     static REPROBE_INTERVAL = 30000;
     static OVERRIDE_DURATION = 300000; // 5 minutes
@@ -99,15 +99,7 @@ class ModeDetector extends EventTarget {
             return;
         }
 
-        // Probe Cloudflare Worker (MODE-02)
-        const workerReachable = await this._probeUrl(ModeDetector.WORKER_URL);
-        if (workerReachable) {
-            this._setMode(ModeDetector.MODES.PLANNING);
-            return;
-        }
-
-        // Both probes failed — if browser reports online, stay in planning mode
-        // (Worker may not be deployed yet). Only go offline if truly disconnected.
+        // Pi not reachable — check if browser has network connectivity
         if (typeof navigator !== 'undefined' && navigator.onLine) {
             this._setMode(ModeDetector.MODES.PLANNING);
             return;

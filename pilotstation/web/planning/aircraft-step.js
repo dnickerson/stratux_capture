@@ -13,6 +13,9 @@ class AircraftStep {
         this.stationWeights = {};
         this.fuelGal = 0;
         this.passengers = 0;
+        this.leftTic = 0;
+        this.rightTic = 0;
+        this.latestEdm = null;
     }
 
     async render(container, workflowData) {
@@ -30,6 +33,13 @@ class AircraftStep {
                 this.fuelGal = saved.loading.fuel_gal || 0;
                 this.passengers = saved.loading.total_pax || 0;
             }
+            if (saved.ticLeft != null) this.leftTic = saved.ticLeft;
+            if (saved.ticRight != null) this.rightTic = saved.ticRight;
+        }
+
+        // Load latest EDM reading for tic mark comparison
+        if (this.selectedProfile?.tic_polynomial) {
+            this.latestEdm = await this.db.getLatestEdmReading(this.selectedProfile.id);
         }
 
         this._render();
@@ -115,6 +125,8 @@ class AircraftStep {
                 </div>
             </div>
 
+            ${this._renderTicSection(ac)}
+
             <div class="card">
                 <div class="card-title">Fuel Phases — ${ac.fuel_phases?.source === 'actual_data' ? 'Engine Monitor Data' : 'Lycoming O-360-A1A Chart'}</div>
                 ${this._renderFuelPhases(ac)}
@@ -198,7 +210,28 @@ class AircraftStep {
             });
         }
 
+        // Tic mark toggle and inputs
+        const ticToggle = this.container.querySelector('#ticToggle');
+        if (ticToggle) {
+            ticToggle.addEventListener('click', () => {
+                const section = this.container.querySelector('#ticSection');
+                const icon = this.container.querySelector('#ticToggleIcon');
+                if (section && icon) {
+                    section.hidden = !section.hidden;
+                    icon.textContent = section.hidden ? '\u25B6' : '\u25BC';
+                }
+            });
+        }
+        this.container.querySelectorAll('.tic-input').forEach(input => {
+            input.addEventListener('input', () => this._updateTicConversion());
+        });
+        const ticApply = this.container.querySelector('#ticApply');
+        if (ticApply) ticApply.addEventListener('click', () => this._applyTicFuel());
+        const ticSave = this.container.querySelector('#ticSave');
+        if (ticSave) ticSave.addEventListener('click', () => this._saveMeasurement());
+
         this._updatePreview();
+        this._updateTicConversion();
     }
 
     async _updatePhaseValue(phase, field, value) {
@@ -348,6 +381,140 @@ class AircraftStep {
         }
     }
 
+    _renderTicSection(ac) {
+        if (!ac.tic_polynomial) return '';
+
+        const edmLine = this.latestEdm
+            ? '<div class="flex justify-between mt-sm text-sm">' +
+              '<span>EDM Last Flight:</span>' +
+              '<span class="font-mono">' + this.latestEdm.total_gal + ' gal</span>' +
+              '</div>' +
+              '<div class="flex justify-between text-sm" id="ticVariance">' +
+              '<span>Variance:</span>' +
+              '<span class="font-mono">\u2014</span>' +
+              '</div>'
+            : '<div class="text-sm text-muted mt-sm">No EDM data from previous flight.</div>';
+
+        return `
+            <div class="card">
+                <div class="card-title" style="cursor:pointer;" id="ticToggle">
+                    Pre-Flight Fuel Check <span class="text-sm text-muted" id="ticToggleIcon">&#x25B6;</span>
+                </div>
+                <div id="ticSection" hidden>
+                    <p class="text-sm text-muted" style="margin-bottom:12px;">
+                        Measure fuel in each tank using sight gauge tic marks. Polynomial converts to gallons.
+                    </p>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+                        <div>
+                            <label class="input-label">Left Tank (tics)</label>
+                            <input type="number" class="input tic-input" id="ticLeft"
+                                value="${this.leftTic}" min="0" max="${ac.tic_polynomial.max_tic}"
+                                step="0.25" inputmode="decimal">
+                            <div class="text-sm text-muted mt-sm" id="ticLeftGal">= 0.0 gal</div>
+                        </div>
+                        <div>
+                            <label class="input-label">Right Tank (tics)</label>
+                            <input type="number" class="input tic-input" id="ticRight"
+                                value="${this.rightTic}" min="0" max="${ac.tic_polynomial.max_tic}"
+                                step="0.25" inputmode="decimal">
+                            <div class="text-sm text-muted mt-sm" id="ticRightGal">= 0.0 gal</div>
+                        </div>
+                    </div>
+                    <div style="padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;margin-bottom:12px;">
+                        <div class="flex justify-between" style="font-weight:600;">
+                            <span>Measured Total:</span>
+                            <span id="ticTotal" class="font-mono">0.0 gal</span>
+                        </div>
+                        ${edmLine}
+                    </div>
+                    <div class="flex gap-sm">
+                        <button class="btn btn-primary btn-sm" id="ticApply">Apply to Fuel</button>
+                        <button class="btn btn-sm" id="ticSave">Save Measurement</button>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    _updateTicConversion() {
+        const ac = this.selectedProfile;
+        if (!ac?.tic_polynomial) return;
+
+        const leftInput = this.container.querySelector('#ticLeft');
+        const rightInput = this.container.querySelector('#ticRight');
+        if (!leftInput || !rightInput) return;
+
+        this.leftTic = parseFloat(leftInput.value) || 0;
+        this.rightTic = parseFloat(rightInput.value) || 0;
+
+        const leftGal = FuelEngine.ticToGallons(this.leftTic, ac.tic_polynomial.coefficients);
+        const rightGal = FuelEngine.ticToGallons(this.rightTic, ac.tic_polynomial.coefficients);
+        const total = leftGal + rightGal;
+
+        const leftEl = this.container.querySelector('#ticLeftGal');
+        const rightEl = this.container.querySelector('#ticRightGal');
+        const totalEl = this.container.querySelector('#ticTotal');
+        if (leftEl) leftEl.textContent = '= ' + leftGal.toFixed(1) + ' gal';
+        if (rightEl) rightEl.textContent = '= ' + rightGal.toFixed(1) + ' gal';
+        if (totalEl) totalEl.textContent = total.toFixed(1) + ' gal';
+
+        const varianceEl = this.container.querySelector('#ticVariance');
+        if (varianceEl && this.latestEdm) {
+            const variance = total - this.latestEdm.total_gal;
+            const pct = this.latestEdm.total_gal > 0
+                ? Math.abs(variance / this.latestEdm.total_gal * 100) : 0;
+            const grade = FuelEngine.getAccuracyGrade(pct);
+            const color = grade === 'excellent' ? 'var(--color-success, green)'
+                : grade === 'good' ? 'var(--color-warning, orange)' : 'var(--color-danger, red)';
+            varianceEl.innerHTML = '<span>Variance:</span>' +
+                '<span class="font-mono" style="color:' + color + ';">' +
+                (variance > 0 ? '+' : '') + variance.toFixed(1) +
+                ' gal (' + pct.toFixed(1) + '% \u2014 ' + grade + ')</span>';
+        }
+    }
+
+    _applyTicFuel() {
+        const ac = this.selectedProfile;
+        if (!ac?.tic_polynomial) return;
+
+        const leftGal = FuelEngine.ticToGallons(this.leftTic, ac.tic_polynomial.coefficients);
+        const rightGal = FuelEngine.ticToGallons(this.rightTic, ac.tic_polynomial.coefficients);
+        const total = Math.round((leftGal + rightGal) * 10) / 10;
+
+        this.fuelGal = total;
+        const fuelInput = this.container.querySelector('.fuel-input');
+        if (fuelInput) fuelInput.value = total;
+
+        const fuelStation = (ac.stations || []).find(s => s.fuel);
+        const weightEl = this.container.querySelector('.fuel-weight');
+        if (weightEl && fuelStation) {
+            weightEl.textContent = (total * (fuelStation.gal_to_lbs || 6)).toFixed(0);
+        }
+        this._updatePreview();
+        this._notifyChange();
+    }
+
+    async _saveMeasurement() {
+        const ac = this.selectedProfile;
+        if (!ac?.tic_polynomial) return;
+
+        const measurement = FuelEngine.createMeasurement(
+            this.leftTic, this.rightTic,
+            ac.tic_polynomial.coefficients,
+            this.latestEdm?.total_gal || null
+        );
+        measurement.aircraft_id = ac.id;
+
+        await this.db.saveFuelMeasurement(measurement);
+        this.latestEdm = measurement;
+
+        const btn = this.container.querySelector('#ticSave');
+        if (btn) {
+            btn.textContent = 'Saved!';
+            setTimeout(() => { btn.textContent = 'Save Measurement'; }, 2000);
+        }
+    }
+
     _notifyChange() {
         this.controller.dataChanged('aircraft', this.getData());
     }
@@ -383,6 +550,8 @@ class AircraftStep {
                 fuel_weight: this.fuelGal * (fuelStation?.gal_to_lbs || 6),
                 total_pax: totalPax + 1, // +1 for pilot
             },
+            ticLeft: this.leftTic,
+            ticRight: this.rightTic,
         };
     }
 

@@ -226,6 +226,7 @@ class RouteStep {
                             <th style="padding:4px 8px;">GS</th>
                             <th style="padding:4px 8px;">Time</th>
                             <th style="padding:4px 8px;">Fuel</th>
+                            <th style="padding:4px 8px;">Rem</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -243,6 +244,13 @@ class RouteStep {
                                 const color = p.phase === 'climb' ? 'var(--accent,#06c)' : p.phase === 'descent' ? 'var(--color-warning,#c80)' : 'inherit';
                                 return `<span class="text-sm" style="color:${color};" title="${Math.round(p.dist)}nm ${p.fuel.toFixed(1)}g">${label}</span>`;
                             }).join(' ');
+                            // Fuel remaining with color-coded reserve warning
+                            let remCell = '—';
+                            if (l.fuel_remaining != null) {
+                                const remColor = l.reserve_min > 45 ? 'var(--color-success,#080)'
+                                    : l.reserve_min > 30 ? 'var(--color-warning,#c80)' : 'var(--color-danger,#d00)';
+                                remCell = `<span style="color:${remColor};" title="${l.reserve_min}min reserve">${l.fuel_remaining.toFixed(1)}g</span>`;
+                            }
                             return `
                                 <tr style="border-top:1px solid var(--border);">
                                     <td style="padding:6px 8px;" class="font-mono">${l.from} → ${l.to}</td>
@@ -254,6 +262,7 @@ class RouteStep {
                                     <td style="padding:6px 8px;" class="font-mono" style="font-weight:600;">${l.gs_kt || '—'}</td>
                                     <td style="padding:6px 8px;" class="font-mono">${RouteStep.formatTime(l.ete_min)}</td>
                                     <td style="padding:6px 8px;" class="font-mono">${l.fuel_gal?.toFixed(1) || '—'}g ${phaseTags}</td>
+                                    <td style="padding:6px 8px;" class="font-mono">${remCell}</td>
                                 </tr>
                             `;
                         }).join('')}
@@ -457,7 +466,7 @@ class RouteStep {
     }
 
     /**
-     * Request route recommendation from 1800wxbrief via Worker.
+     * Request route recommendation from 1800wxbrief via API proxy.
      */
     async _suggestRoute() {
         if (!this.departure || !this.destination) {
@@ -501,7 +510,7 @@ class RouteStep {
             }
         } else {
             statusEl.style.color = 'var(--color-danger, red)';
-            statusEl.textContent = result.error || 'Route recommendation unavailable. Worker not deployed — enter route manually or use direct.';
+            statusEl.textContent = result.error || 'Route recommendation unavailable — enter route manually or use direct.';
             // The user can still enter routes manually via the route string input
         }
     }
@@ -669,7 +678,7 @@ class RouteStep {
         const midLat = (dep.lat + dest.lat) / 2;
         const midLon = (dep.lon + dest.lon) / 2;
 
-        // Fetch FD winds aloft text via Cloudflare Worker proxy (CORS-safe)
+        // Fetch FD winds aloft text via API proxy
         try {
             const url = `${FlightPlanFiler.WORKER_BASE}/wx/windtemp?region=all&level=low&fcst=06`;
             console.log('Fetching FD winds from:', url);
@@ -780,6 +789,12 @@ class RouteStep {
         const descIas   = phases?.descent?.ias_kt ?? (acData?.aircraft?.cruise_ias || 120);
         const descFpm   = phases?.descent?.rate_fpm ?? 500;
 
+        // Compute taxi fuel upfront for carry-forward tracking
+        const taxiFuel = (taxiMin / 60) * taxiGph;
+        const departureFuel = acData?.loading?.fuel_gal || 0;
+        let fuelRemaining = departureFuel - taxiFuel;
+        const legFuelStates = [];
+
         let totalClimbFuel = 0, totalCruiseFuel = 0, totalDescFuel = 0;
         let totalClimbMin = 0, totalCruiseMin = 0, totalDescMin = 0;
         let totalClimbDist = 0, totalDescDist = 0;
@@ -856,11 +871,19 @@ class RouteStep {
             leg.gs_kt = legTime > 0 ? Math.round(leg.dist_nm / (legTime / 60)) : (leg.tas_kt || 150);
             leg.phases = legPhases;
 
+            // Fuel carry-forward tracking
+            const startFuel = parseFloat(fuelRemaining.toFixed(1));
+            fuelRemaining -= legFuel;
+            const endFuel = parseFloat(fuelRemaining.toFixed(1));
+            const reserveMin = endFuel > 0 ? Math.round((endFuel / cruiseGph) * 60) : 0;
+            leg.fuel_remaining = endFuel;
+            leg.reserve_min = reserveMin;
+            legFuelStates.push({ start_fuel: startFuel, burn_gal: leg.fuel_gal, end_fuel: endFuel, reserve_min: reserveMin });
+
             prevAlt = legAlt; // next leg starts from this altitude
         }
 
-        // Taxi
-        const taxiFuel = (taxiMin / 60) * taxiGph;
+        // Taxi (computed above for fuel tracking)
         const totalDist = this.legs.reduce((s, l) => s + (l.dist_nm || 0), 0);
         const cruiseDist = Math.max(0, totalDist - totalClimbDist - totalDescDist);
         const totalFuel = taxiFuel + totalClimbFuel + totalCruiseFuel + totalDescFuel;
@@ -879,6 +902,9 @@ class RouteStep {
             cruise:  { gal: totalCruiseFuel, time_min: totalCruiseMin, gph: cruiseGph, dist_nm: cruiseDist, tas_kt: cruiseTasDisplay },
             descent: { gal: totalDescFuel, time_min: totalDescMin, gph: descGph, dist_nm: totalDescDist, tas_kt: descTasDisplay },
             total:   { gal: totalFuel, time_min: totalMin },
+            legFuelStates,
+            departure_fuel: departureFuel,
+            destination_fuel: parseFloat(fuelRemaining.toFixed(1)),
         };
     }
 
@@ -983,6 +1009,11 @@ class RouteStep {
                 climb:   { gal: pf.climb.gal, time_min: pf.climb.time_min, dist_nm: pf.climb.dist_nm },
                 cruise:  { gal: pf.cruise.gal, time_min: pf.cruise.time_min, dist_nm: pf.cruise.dist_nm },
                 descent: { gal: pf.descent.gal, time_min: pf.descent.time_min, dist_nm: pf.descent.dist_nm },
+            } : null,
+            fuelState: pf ? {
+                departure_fuel: pf.departure_fuel,
+                destination_fuel: pf.destination_fuel,
+                legFuelStates: pf.legFuelStates,
             } : null,
         };
     }

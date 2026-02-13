@@ -6,7 +6,7 @@
  */
 
 class AiClient {
-    static WORKER_BASE = 'https://pilotstation-api.pilotstation.workers.dev';
+    static WORKER_BASE = '/api';
     static MODEL = 'claude-sonnet-4-5-20250929';
     static MAX_TOKENS = 4096;
 

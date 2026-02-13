@@ -6,7 +6,7 @@
 
 class NasrDB {
     static DB_NAME = 'pilotstation';
-    static DB_VERSION = 2;
+    static DB_VERSION = 3;
 
     constructor() {
         this._db = null;
@@ -84,6 +84,13 @@ class NasrDB {
                 if (!db.objectStoreNames.contains('ai_briefings')) {
                     const store = db.createObjectStore('ai_briefings', { keyPath: 'id' });
                     store.createIndex('flight_plan_id', 'flight_plan_id', { unique: false });
+                }
+
+                // Fuel measurements (tic mark readings, EDM comparisons)
+                if (!db.objectStoreNames.contains('fuel_measurements')) {
+                    const store = db.createObjectStore('fuel_measurements', { keyPath: 'id' });
+                    store.createIndex('aircraft_id', 'aircraft_id', { unique: false });
+                    store.createIndex('measured_at', 'measured_at', { unique: false });
                 }
 
                 // Key-value metadata store
@@ -313,6 +320,29 @@ class NasrDB {
 
     async saveAircraftProfiles(profiles) {
         return this._bulkPut('aircraft_profiles', profiles);
+    }
+
+    // ========== Fuel Measurements ==========
+
+    async saveFuelMeasurement(measurement) {
+        if (!measurement.id) {
+            measurement.id = crypto.randomUUID ? crypto.randomUUID() : `fm-${Date.now()}`;
+        }
+        measurement.measured_at = measurement.measured_at || new Date().toISOString();
+        return this._put('fuel_measurements', measurement);
+    }
+
+    async getFuelMeasurements(aircraftId, limit = 100) {
+        const all = await this._getAll('fuel_measurements');
+        return all
+            .filter(m => m.aircraft_id === aircraftId)
+            .sort((a, b) => b.measured_at.localeCompare(a.measured_at))
+            .slice(0, limit);
+    }
+
+    async getLatestEdmReading(aircraftId) {
+        const measurements = await this.getFuelMeasurements(aircraftId, 1);
+        return measurements.length > 0 ? measurements[0] : null;
     }
 
     // ========== AI Briefings ==========

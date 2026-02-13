@@ -6,11 +6,11 @@
  *
  * Leidos REST API docs: https://lmfswebservices.atlassian.net/wiki/spaces/WSS/overview
  * Base URL: https://lmfsweb.afss.com/Website/rest/FP/...
- * Auth: HTTP Basic (Vendor_ID:Vendor_Password) — proxied via Cloudflare Worker
+ * Auth: HTTP Basic (Vendor_ID:Vendor_Password) — proxied via Vercel API routes
  */
 
 class FlightPlanFiler {
-    static WORKER_BASE = 'https://pilotstation-api.pilotstation.workers.dev';
+    static WORKER_BASE = '/api';
 
     /**
      * Equipment suffix lookup table (common suffixes).

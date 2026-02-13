@@ -1,19 +1,19 @@
 # PilotStation: Unified Cockpit EFB Platform
 
-## Product Requirements Document v1.7
+## Product Requirements Document v1.8
 
-**Date:** 2026-02-12
+**Date:** 2026-02-13
 **Author:** Dana Nickerson
-**Platform:** Raspberry Pi 5 (headless server) + iPad (display via Safari)
+**Platform:** Raspberry Pi 5 (headless server) + iPad (cockpit display via Safari) + Vercel (planning server at `flywhere.app`)
 **Status:** Draft — Phase 1d complete, Phase 2 partially complete
 
 ---
 
 ## 1. Executive Summary
 
-PilotStation is a unified, open-source Electronic Flight Bag (EFB) platform that consolidates navigation, engine monitoring, fuel planning, weather briefing, flight planning, and flight logging into a single cockpit-optimized web interface. The **Raspberry Pi 5 runs headless** as a server (alongside Stratux ADS-B), serving the full PilotStation UI to an **iPad via Safari** over the existing Stratux WiFi hotspot (`192.168.10.1`).
+PilotStation is a unified, open-source Electronic Flight Bag (EFB) platform that consolidates navigation, engine monitoring, fuel planning, weather briefing, flight planning, and flight logging into a cockpit-optimized web interface. The system uses a **split architecture**: a **Vercel-hosted planning app** at `flywhere.app/plan` handles all pre-flight planning on any internet-connected device, while the **Raspberry Pi 5 runs headless** as an in-cockpit server (alongside Stratux ADS-B), serving the cockpit UI to an **iPad via Safari** over the existing Stratux WiFi hotspot (`192.168.10.1`).
 
-The PWA operates as a **dual-mode application**: when the iPad is on home WiFi (internet), it enters **Planning Mode** with a 6-step pre-flight workflow integrating route planning, weather, weight & balance, fuel stop optimization, an AI copilot (Claude API) for weather analysis and go/no-go reasoning, official weather briefing via 1800wxbrief, and VFR/IFR flight plan filing. When the iPad connects to Stratux WiFi at the aircraft, it enters **Cockpit Mode** with the full in-flight UI, automatically syncing the flight plan package to the Pi and reminding the pilot to activate and close filed flight plans.
+**Planning** (`flywhere.app/plan`) provides a 6-step pre-flight workflow integrating route planning, weather, weight & balance, fuel stop optimization, an AI copilot (Claude API) for weather analysis and go/no-go reasoning, official weather briefing via 1800wxbrief, and VFR/IFR flight plan filing — all backed by a Vercel Postgres database for persistent storage. **Cockpit Mode** (iPad on Stratux WiFi) provides the full in-flight UI, syncing the flight plan package from the planning server and reminding the pilot to activate and close filed flight plans.
 
 This architecture leverages:
 
@@ -21,9 +21,10 @@ This architecture leverages:
 - **Existing workflow** — the engine monitor v3.3.0 already works this way (iPad → `192.168.10.1:8080`)
 - **No AvareX dependency** — FAA sectional/IFR charts are served as map tiles directly from the Pi using Leaflet.js, eliminating all of AvareX's UI/UX problems
 - **Existing Stratux hardware** — ADS-B reception, WiFi hotspot, GPS already running on the Pi
-- **Dual-mode PWA** — one app handles both pre-flight planning (internet) and in-flight cockpit display (Stratux WiFi)
-- **AI-powered decision support** — Claude API via Cloudflare Worker proxy for weather analysis, NOTAM filtering, and go/no-go reasoning
+- **Split architecture** — Vercel web app for pre-flight planning (internet, any device), cockpit PWA for in-flight display (iPad on Stratux WiFi)
+- **AI-powered decision support** — Claude API via Vercel server-side API routes for weather analysis, NOTAM filtering, and go/no-go reasoning
 - **Integrated flight plan filing** — file VFR/IFR plans and obtain official weather briefings via 1800wxbrief API, with smart cockpit reminders for activation and closing
+- **Device-agnostic planning** — pre-flight planning accessible from any browser (laptop, phone, tablet) at `flywhere.app/plan`, not limited to the iPad
 
 It replaces ForeFlight ($200+/yr subscription) by integrating custom-built modules (engine monitor v3.3.0, fuel planner) with a new web-based moving map and new capabilities (profile view, logbook, weather briefing, AI copilot) — all in one unified cockpit UI.
 
@@ -31,49 +32,52 @@ The core design principle is **cockpit-first UI/UX**: every interaction must be 
 
 ---
 
-## 1.1 Implementation Status (as of 2026-02-12)
+## 1.1 Implementation Status (as of 2026-02-13)
 
 | Phase | Status | Summary |
 |-------|--------|---------|
 | **Phase 1a** — Data pipeline | **Not started** | FAA chart tile processing, approach plate preparation, NASR data conversion |
 | **Phase 1b** — Pi server setup | **Not started** | Nginx, FastAPI backend, overlay-aware storage, WebSocket server |
 | **Phase 1c** — Cockpit mode UI | **Not started** | MAP, ENGINE, FUEL, WX, PLAN, LOG cockpit views on iPad |
-| **Phase 1d** — Dual-Mode PWA | **Complete** | Full 6-step planning workflow, mode detection, weather, W&B, flight plan filing, Cloudflare Worker, data sync |
-| **Phase 2** — AI & Advanced Planning | **Partially complete** | AI client, dashboard view, and `/claude` Worker route implemented; cockpit-side AI, profile view, fuel stop optimization pending |
+| **Phase 1d** — Planning App + Cockpit Sync | **Complete** | Full 6-step planning workflow on Vercel (`flywhere.app/plan`), mode detection, weather, W&B, flight plan filing, fuel planner integration, data sync |
+| **Phase 2** — AI & Advanced Planning | **Partially complete** | AI client, dashboard view, and `/claude` Vercel API route implemented; cockpit-side AI, profile view, fuel stop optimization pending |
 | **Phase 3** — Cockpit Planning & Logbook | **Not started** | Cockpit-side route entry, logbook, filed plan reminders |
 | **Phase 4** — Polish & Integration | **Not started** | Garmin GPS 175, synthetic vision, OTA updates |
 
 **Phase 1d delivered components:**
 
-| Component | File | Lines | Features |
-|-----------|------|-------|----------|
-| App shell & orchestrator | `pilotstation/web/index.html`, `app.js` | 462 | PWA shell, mode switching, bootstrap data, alert/toast system |
-| Mode detector | `pilotstation/web/mode-detector.js` | 151 | Network probe state machine, 3 modes, manual override, localStorage persistence |
-| Workflow controller | `pilotstation/web/planning/workflow.js` | 209 | 6-step state machine, auto-save to IndexedDB, step validation |
-| Step 1: Aircraft | `pilotstation/web/planning/aircraft-step.js` | 391 | Aircraft selection, per-station weight entry, fuel quantity, POB |
-| Step 2: Route | `pilotstation/web/planning/route-step.js` | 1,079 | Route parsing, VOR navaids, winds aloft, IAS→TAS, phase-of-flight fuel model, per-leg altitude, hemispheric rule |
-| Step 3: Weather | `pilotstation/web/planning/weather-step.js` | 269 | Auto-fetch METAR/TAF/winds/PIREP/SIGMET via Cloudflare Worker, staleness detection |
-| Step 4: W&B | `pilotstation/web/planning/wb-step.js` | 300 | Station loading, CG calculation, envelope diagram, takeoff/landing W&B |
-| Step 5: Briefing | `pilotstation/web/planning/briefing-step.js` | 418 | Smart briefing, rules-based go/no-go, 1800wxbrief official briefing |
-| Step 6: Ready/File | `pilotstation/web/planning/ready-step.js` | 615 | Flight plan filing form, auto-populated fields, amend/cancel, upload to Pi |
-| Dashboard | `pilotstation/web/planning/dashboard.js` | 154 | 2×3 grid overview of all 6 steps (pulled forward from Phase 2) |
-| Weather client | `pilotstation/web/shared/weather-client.js` | 403 | aviationweather.gov API integration, METAR decoding, winds aloft, caching |
-| W&B calculator | `pilotstation/web/shared/wb-calculator.js` | 202 | Pure computation: CG, moments, envelope verification |
-| Flight plan filer | `pilotstation/web/shared/flight-plan-filer.js` | 293 | 1800wxbrief filing, amendment, cancellation, official briefing |
-| AI client | `pilotstation/web/shared/ai-client.js` | 285 | Claude Sonnet 4.5 integration (pulled forward from Phase 2) |
-| Flight plan model | `pilotstation/web/shared/flight-plan-model.js` | 226 | Full flight plan package schema |
-| NASR database | `pilotstation/web/shared/nasr-db.js` | 381 | IndexedDB with 10+ object stores |
-| Sync manager | `pilotstation/web/shared/sync-manager.js` | 232 | Two-way sync with Pi, exponential backoff |
-| Style system | `pilotstation/web/style.css` | 1,000+ | Dual-theme CSS (planning/cockpit/night), aviation colors, touch targets |
-| Cloudflare Worker | `pilotstation-worker/src/index.js` | 201 | CORS proxy: `/wx/*`, `/fp/*`, `/briefing`, `/claude`, `/health`, rate limiting |
-| **Total PWA frontend** | | **~5,500** | |
+*Planning app components are hosted on Vercel at `flywhere.app/plan`. Cockpit components remain on the Pi. Shared modules are used by both.*
+
+| Component | File | Lines | Features | Hosted |
+|-----------|------|-------|----------|--------|
+| App shell & orchestrator | `pilotstation/web/index.html`, `app.js` | 462 | PWA shell, mode switching, bootstrap data, alert/toast system | Pi + Vercel |
+| Mode detector | `pilotstation/web/mode-detector.js` | 151 | Network probe state machine, 3 modes, manual override, localStorage persistence | Pi |
+| Workflow controller | `pilotstation/web/planning/workflow.js` | 209 | 6-step state machine, auto-save, step validation | Vercel |
+| Step 1: Aircraft | `pilotstation/web/planning/aircraft-step.js` | 391 | Aircraft selection, per-station weight entry, fuel quantity, POB | Vercel |
+| Step 2: Route | `pilotstation/web/planning/route-step.js` | 1,079 | Route parsing, VOR navaids, winds aloft, IAS→TAS, phase-of-flight fuel model, per-leg altitude, hemispheric rule | Vercel |
+| Step 3: Weather | `pilotstation/web/planning/weather-step.js` | 269 | Auto-fetch METAR/TAF/winds/PIREP/SIGMET, staleness detection | Vercel |
+| Step 4: W&B | `pilotstation/web/planning/wb-step.js` | 300 | Station loading, CG calculation, envelope diagram, takeoff/landing W&B | Vercel |
+| Step 5: Briefing | `pilotstation/web/planning/briefing-step.js` | 418 | Smart briefing, rules-based go/no-go, 1800wxbrief official briefing | Vercel |
+| Step 6: Ready/File | `pilotstation/web/planning/ready-step.js` | 615 | Flight plan filing form, auto-populated fields, amend/cancel, upload to Pi | Vercel |
+| Dashboard | `pilotstation/web/planning/dashboard.js` | 154 | 2×3 grid overview of all 6 steps (pulled forward from Phase 2) | Vercel |
+| Weather client | `pilotstation/web/shared/weather-client.js` | 403 | aviationweather.gov API integration, METAR decoding, winds aloft, caching | Vercel |
+| W&B calculator | `pilotstation/web/shared/wb-calculator.js` | 202 | Pure computation: CG, moments, envelope verification | Both |
+| Flight plan filer | `pilotstation/web/shared/flight-plan-filer.js` | 293 | 1800wxbrief filing, amendment, cancellation, official briefing | Vercel |
+| AI client | `pilotstation/web/shared/ai-client.js` | 285 | Claude Sonnet 4.5 integration (pulled forward from Phase 2) | Vercel |
+| Flight plan model | `pilotstation/web/shared/flight-plan-model.js` | 226 | Full flight plan package schema | Both |
+| NASR database | `pilotstation/web/shared/nasr-db.js` | 381 | IndexedDB with 10+ object stores | Both |
+| Sync manager | `pilotstation/web/shared/sync-manager.js` | 232 | Two-way sync with Pi, exponential backoff | Pi (cockpit) |
+| Style system | `pilotstation/web/style.css` | 1,000+ | Dual-theme CSS (planning/cockpit/night), aviation colors, touch targets | Both |
+| Vercel API routes | `flywhere.app/api/*` | — | Server-side proxy: `/api/wx/*`, `/api/fp/*`, `/api/briefing`, `/api/claude` | Vercel |
+| Vercel Postgres | Vercel project | — | Persistent storage for flight plans, aircraft profiles, planning state | Vercel |
+| **Total frontend** | | **~5,500** | | |
 
 **Existing Capture_V5 components (operational, pre-PilotStation):**
 
 | Component | File | Status |
 |-----------|------|--------|
 | Engine monitor | `capture_v5/engine_monitor.py` (~2,900 lines) | Operational — serves on port 8080, CSV recording, fuel tracking, sticky valve detection |
-| Fuel planner PWA | `capture_v5/fuel-planner.html/js/css` | Operational — standalone PWA with burn rate profiles, tic calibration |
+| Fuel planner PWA | `capture_v5/fuel-planner.html/js/css` | Operational — now integrated into `flywhere.app/plan` planning app (tic calibration, burn profiles, carry-forward, offline) |
 | Service worker | `capture_v5/service-worker.js` | Operational — stale-while-revalidate caching |
 
 ---
@@ -87,7 +91,7 @@ Today's cockpit requires a pilot to manage multiple disconnected systems:
 | ForeFlight (iPad)               | Charts, navigation, weather, flight planning             | $200+/yr subscription, closed ecosystem                              |
 | Stratux (Pi)                    | ADS-B traffic and FIS-B weather                          | Separate web UI, not integrated with engine/fuel data                |
 | Engine Monitor v3.3.0 (Pi/iPad) | EDM-700/800 data, power analysis, sticky valve detection | Separate web app on port 8080, not integrated with navigation        |
-| Fuel Planner PWA (Pi/iPad)      | Fuel tracking, tic measurements, burn rate profiles      | Separate app, manual sync with engine monitor                        |
+| Fuel Planner PWA (Pi/iPad)      | Fuel tracking, tic measurements, burn rate profiles      | Separate app — now integrated into `flywhere.app/plan` + cockpit PWA |
 | Garmin GPS 175 (panel)          | IFR navigation, WAAS approaches                          | Proprietary Connext protocol limits third-party flight plan transfer |
 | Paper/1800wxbrief               | Weather briefing, profile view                           | No digital integration, no cross-section visualization               |
 
@@ -153,7 +157,7 @@ The primary display is a **single-screen layout with persistent zones**:
 - **Right panel** (right ~30%): split into a contextual top section (changes per view) and a persistent bottom strip that always shows engine/fuel health at a glance
 - **Nav bar** (bottom): 6 large tab buttons, always accessible — no buried menus
 
-**Note:** This layout describes **Cockpit Mode** (Stratux WiFi). In **Planning Mode** (home WiFi), the layout adapts with a different status bar, step progress nav bar, and light color scheme — see Section 5.7.4 and Section 7.4 for Planning Mode layouts.
+**Note:** This layout describes **Cockpit Mode** (Stratux WiFi). **Planning Mode** is a separate web application at `flywhere.app/plan` with its own layout, light color scheme, step progress nav bar, and status bar — see Section 5.7 and Section 7.4 for Planning Mode details.
 
 ---
 
@@ -188,35 +192,35 @@ The primary display is a **single-screen layout with persistent zones**:
 ### 5.2 Software Stack
 
 ```
-  iPad (Display)                    Raspberry Pi 5 (Headless Server)
-┌─────────────────┐              ┌─────────────────────────────────────┐
-│                 │   WiFi       │                                     │
-│  Safari / PWA   │◀──────────▶│  Nginx (reverse proxy + tile server) │
-│                 │ 192.168.10.1 │    ├── /            → PilotStation UI│
-│  PilotStation   │              │    ├── /tiles/      → FAA chart tiles│
-│  Web UI         │              │    └── /api/        → FastAPI backend│
-│  (HTML/CSS/JS)  │              │                                     │
-│  Leaflet.js map │              │  FastAPI Backend (Python)            │
-│  Chart.js graphs│              │    ├── Engine Monitor (from v3.3.0) │
-│  WebSocket live │              │    ├── Fuel Planner                  │
-│                 │              │    ├── Weather Service               │
-│                 │              │    ├── Flight Planner                │
-│                 │              │    ├── Logbook                       │
-│                 │              │    ├── GDL90 Listener                │
-│                 │              │    └── WebSocket Server              │
-│                 │              │                                     │
-│                 │              │  Stratux (existing)                  │
-│                 │              │    ├── dump978 / dump1090            │
-│                 │              │    ├── GPS (NMEA)                    │
-│                 │              │    └── WiFi hotspot                  │
-│                 │              │                                     │
-│                 │              │  Nginx serving static files:         │
-│                 │              │    └── /tiles/{z}/{x}/{y}.webp      │
-│                 │              │        (FAA sectional, IFR, TAC)    │
-└─────────────────┘              └─────────────────────────────────────┘
-         │ Bluetooth                        │ Serial (USB)
-         ▼                                  ▼
-   ┌──────────┐                      ┌──────────────┐
+  Any Browser (Planning)            iPad (Cockpit Display)            Raspberry Pi 5 (Headless Server)
+┌───────────────────────┐        ┌─────────────────┐              ┌─────────────────────────────────────┐
+│                       │        │                 │   WiFi       │                                     │
+│  flywhere.app/plan    │        │  Safari / PWA   │◀──────────▶│  Nginx (reverse proxy + tile server) │
+│  (Vercel-hosted)      │        │                 │ 192.168.10.1 │    ├── /            → PilotStation UI│
+│                       │        │  PilotStation   │              │    ├── /tiles/      → FAA chart tiles│
+│  Planning Workflow UI │        │  Cockpit UI     │              │    └── /api/        → FastAPI backend│
+│  6-step guided flow   │        │  (HTML/CSS/JS)  │              │                                     │
+│  Vercel API routes    │        │  Leaflet.js map │              │  FastAPI Backend (Python)            │
+│  Vercel Postgres DB   │        │  Chart.js graphs│              │    ├── Engine Monitor (from v3.3.0) │
+│  Fuel planner +       │        │  WebSocket live │              │    ├── Fuel Planner                  │
+│  offline via SW/IDB   │        │                 │              │    ├── Weather Service               │
+│                       │        │                 │              │    ├── Flight Planner                │
+└───────────────────────┘        │                 │              │    ├── Logbook                       │
+         │                       │                 │              │    ├── GDL90 Listener                │
+         │ Flight plan           │                 │              │    └── WebSocket Server              │
+         │ package sync          │                 │              │                                     │
+         └──────────────────────▶│                 │              │  Stratux (existing)                  │
+                                 │                 │              │    ├── dump978 / dump1090            │
+                                 │                 │              │    ├── GPS (NMEA)                    │
+                                 │                 │              │    └── WiFi hotspot                  │
+                                 │                 │              │                                     │
+                                 │                 │              │  Nginx serving static files:         │
+                                 │                 │              │    └── /tiles/{z}/{x}/{y}.webp      │
+                                 │                 │              │        (FAA sectional, IFR, TAC)    │
+                                 └─────────────────┘              └─────────────────────────────────────┘
+                                          │ Bluetooth                        │ Serial (USB)
+                                          ▼                                  ▼
+                                    ┌──────────┐                      ┌──────────────┐
    │ Garmin   │                      │ EDM-700/800  │
    │ GPS 175  │                      │ or Dynon D180│
    │ (future) │                      │ Engine Mon   │
@@ -225,15 +229,17 @@ The primary display is a **single-screen layout with persistent zones**:
 
 **Key architectural decisions:**
 
-1. **Web-based UI served to iPad via Safari** — the existing engine monitor already works this way. iPad connects to Stratux WiFi, opens `http://192.168.10.1:8080`. Zero app store friction.
+1. **Web-based cockpit UI served to iPad via Safari** — the existing engine monitor already works this way. iPad connects to Stratux WiFi, opens `http://192.168.10.1:8080`. Zero app store friction.
 
-2. **PWA (Progressive Web App)** — add-to-home-screen for full-screen experience, offline caching of UI assets, no Safari chrome/address bar.
+2. **PWA (Progressive Web App) for cockpit** — add-to-home-screen for full-screen experience, offline caching of UI assets, no Safari chrome/address bar.
 
-3. **FAA chart tiles served by Nginx** — FAA provides free GeoTIFF sectional/IFR/TAC charts. These are pre-processed into WEBP map tiles using GDAL (on a desktop machine) and served as static files by Nginx on the Pi. Leaflet.js renders them in Safari. ~3-5 GB for full CONUS coverage. Updated every 56-day AIRAC cycle.
+3. **Vercel-hosted planning app** — pre-flight planning runs as a separate web application at `flywhere.app/plan`, accessible from any internet-connected device (laptop, phone, tablet, iPad). Planning state persists in Vercel Postgres. Flight plan packages sync to the cockpit PWA for upload to the Pi. This decouples planning from the iPad — pilots can plan from any browser.
 
-4. **No AvareX dependency** — by rendering FAA charts natively in Leaflet.js, we control the entire UI/UX. No fighting with AvareX's small buttons, overlapping tap targets, or buried menus.
+4. **FAA chart tiles served by Nginx** — FAA provides free GeoTIFF sectional/IFR/TAC charts. These are pre-processed into WEBP map tiles using GDAL (on a desktop machine) and served as static files by Nginx on the Pi. Leaflet.js renders them in Safari. ~3-5 GB for full CONUS coverage. Updated every 56-day AIRAC cycle.
 
-5. **Stratux coexistence** — PilotStation runs alongside Stratux on the same Pi. Stratux handles ADS-B decoding and WiFi hotspot. PilotStation reads Stratux data via its HTTP API (`localhost/getSituation`) and GDL90 (UDP 4000), exactly as engine_monitor.py v3.3.0 already does.
+5. **No AvareX dependency** — by rendering FAA charts natively in Leaflet.js, we control the entire UI/UX. No fighting with AvareX's small buttons, overlapping tap targets, or buried menus.
+
+6. **Stratux coexistence** — PilotStation runs alongside Stratux on the same Pi. Stratux handles ADS-B decoding and WiFi hotspot. PilotStation reads Stratux data via its HTTP API (`localhost/getSituation`) and GDL90 (UDP 4000), exactly as engine_monitor.py v3.3.0 already does.
 
 ### 5.3 Chart & Data Pipeline
 
@@ -340,27 +346,27 @@ Stratux GPS ──HTTP───▶ Position        ──API──▶ │ 192.16
 
 Weather sources (Pi has no internet):
   In-flight:  FIS-B via Stratux ADS-B (METARs, NEXRAD, TAFs, winds)
-  Pre-flight: Weather fetched in Planning Mode via Cloudflare Worker, uploaded to Pi as flight plan package
+  Pre-flight: Weather fetched by flywhere.app/plan via Vercel API routes, packaged for upload to Pi
 ```
 
 ### 5.5 Connectivity Model
 
-**The Pi stays in the aircraft and never connects to the internet.** This is a fundamental constraint that shapes the entire data architecture. The PilotStation PWA operates in different modes depending on which network the iPad is connected to (see Section 5.7).
+**The Pi stays in the aircraft and never connects to the internet.** This is a fundamental constraint that shapes the entire data architecture. Pre-flight planning runs on a separate Vercel-hosted app (`flywhere.app/plan`) that requires internet, while the cockpit PWA on the iPad connects to the Pi via Stratux WiFi (see Section 5.7).
 
-| Context                | iPad WiFi                   | Pi connectivity | PWA Mode         | Weather source                                   | Data updates                          |
-| ---------------------- | --------------------------- | --------------- | ---------------- | ------------------------------------------------ | ------------------------------------- |
-| At home/FBO            | Home/FBO WiFi (internet)    | Not accessible  | **Planning Mode** | PWA fetches via Cloudflare Worker proxy          | PWA downloads NASR, fuel prices to IndexedDB |
-| Pre-flight at aircraft | Stratux WiFi (192.168.10.1) | iPad ↔ Pi only  | **Cockpit Mode**  | iPad uploads flight plan + weather package to Pi | iPad syncs NASR cache, uploads flight plan |
-| In-flight              | Stratux WiFi (192.168.10.1) | iPad ↔ Pi only  | **Cockpit Mode**  | FIS-B via ADS-B + pre-cached                    | All data on Pi                        |
-| No network             | None                        | Not accessible  | **Offline Mode**  | Cached only — stale data warning                 | No updates possible                   |
+| Context                | Device / Network                | Pi connectivity | App              | Weather source                                   | Data updates                          |
+| ---------------------- | ------------------------------- | --------------- | ---------------- | ------------------------------------------------ | ------------------------------------- |
+| At home/FBO (planning) | Any device with internet        | Not accessible  | **flywhere.app/plan** | Vercel API routes → aviationweather.gov      | Planning state saved to Vercel Postgres |
+| Pre-flight at aircraft | iPad on Stratux WiFi (192.168.10.1) | iPad ↔ Pi only | **Cockpit Mode** | iPad uploads flight plan + weather package to Pi | iPad syncs flight plan, NASR cache |
+| In-flight              | iPad on Stratux WiFi (192.168.10.1) | iPad ↔ Pi only | **Cockpit Mode** | FIS-B via ADS-B + pre-cached                    | All data on Pi                        |
+| No network             | iPad, no WiFi                   | Not accessible  | **Offline Mode**  | Cached only — stale data warning                 | No updates possible                   |
 
 **Pre-flight planning workflow (see Section 6.11 for details):**
 
-1. At home/FBO: iPad on internet WiFi → PilotStation PWA auto-enters **Planning Mode** → pilot completes 6-step flight planning workflow (aircraft → route → weather → W&B → AI briefing → ready)
-2. PWA fetches weather via Cloudflare Worker proxy, calculates W&B, optionally queries Claude API for AI analysis
-3. PWA auto-saves flight plan package to IndexedDB
-4. Drive to airport, switch iPad to Stratux WiFi
-5. PWA auto-detects Pi → offers to upload flight plan package via `POST /api/plan/upload-package`
+1. At home/FBO: open `flywhere.app/plan` in any browser → complete 6-step flight planning workflow (aircraft → route → weather → W&B → AI briefing → ready)
+2. Vercel app fetches weather via server-side API routes, calculates W&B, optionally queries Claude API for AI analysis
+3. Flight plan package saved to Vercel Postgres (and optionally cached locally in IndexedDB)
+4. Drive to airport, open PilotStation cockpit PWA on iPad, connect to Stratux WiFi
+5. Cockpit PWA syncs flight plan package from Vercel (if internet available) or from local cache, then offers to upload to Pi via `POST /api/plan/upload-package`
 6. Pi receives package: flight plan active on map, weather in cache with "fetched at" timestamp, W&B displayed in PLAN view
 7. In-flight: FIS-B supplements/replaces cached weather with live data received via ADS-B
 
@@ -468,79 +474,84 @@ During flight, engine data and GPS tracks accumulate in **tmpfs** (Tier 3). At f
 
 The SQLite database uses **WAL (Write-Ahead Logging)** mode for atomic writes during the brief overlayctl unlock windows. WAL ensures the database remains consistent even if power is lost during a write. The `-wal` and `-shm` files are written alongside the database in the base filesystem.
 
-### 5.7 Dual-Mode PWA Architecture
+### 5.7 Split Architecture: Vercel Planning + Pi Cockpit
 
-PilotStation is a single PWA that operates in different modes depending on the iPad's network connectivity. This replaces the previous "Companion page" concept with an integrated experience — one app, one install, two modes.
+PilotStation uses a **split architecture** with two separate web applications:
+
+1. **Planning App** (`flywhere.app/plan`) — Vercel-hosted web app for pre-flight planning, accessible from any internet-connected browser
+2. **Cockpit PWA** (`192.168.10.1`) — Pi-served PWA for in-flight use on the iPad via Stratux WiFi
+
+This replaces the previous dual-mode PWA concept (where a single app detected its network and switched modes) with a cleaner separation of concerns. Planning no longer requires the iPad — it can be done from a laptop, phone, or any device with a browser.
 
 #### 5.7.1 Operating Modes
 
 ```
-                        PWA Loads
-                           │
-             ┌─────────────┼─────────────┐
-             ▼             ▼             ▼
-       Pi reachable?   Internet?    Neither?
-       (probe 2s)      (probe 2s)
-             │             │             │
-             ▼             ▼             ▼
-       COCKPIT MODE   PLANNING MODE  OFFLINE MODE
-       (full cockpit   (pre-flight    (cached plan +
-        UI + live       workflow +     stale weather
-        data from Pi)   internet APIs) warning)
+  PLANNING                          COCKPIT
+  (any browser, internet)           (iPad, Stratux WiFi)
 
-       Manual override: [MODE ▼] in status bar
+  flywhere.app/plan                 192.168.10.1
+  ┌──────────────┐                  ┌──────────────┐
+  │ 6-step       │  flight plan     │ Full cockpit │
+  │ planning     │  package sync    │ UI + live    │
+  │ workflow     │─────────────────▶│ data from Pi │
+  │              │                  │              │
+  │ Vercel +     │                  │ Cockpit mode │
+  │ Postgres DB  │                  │ or Offline   │
+  └──────────────┘                  └──────────────┘
 ```
 
-**Mode detection algorithm:**
+**Cockpit mode detection (iPad PWA):**
 
-1. **Network probe (primary):** On page load and every 30 seconds, the PWA probes:
+1. **Network probe (primary):** On page load and every 30 seconds, the cockpit PWA probes:
    - `fetch('http://192.168.10.1/api/status', { signal: AbortSignal.timeout(2000) })` — if reachable → Cockpit Mode
-   - `fetch('https://pilotstation-api.workers.dev/health', { signal: AbortSignal.timeout(2000) })` — if reachable → Planning Mode
-   - Both fail → Offline Mode
+   - Both Pi and internet fail → Offline Mode (cached flight plan + stale weather warning)
 2. **IP address heuristic (fast fallback):** If `window.location.hostname === '192.168.10.1'`, default to Cockpit Mode immediately before probes complete
-3. **Manual override:** Tappable mode badge in status bar (`PLANNING` / `COCKPIT` / `OFFLINE`) opens modal with three options
+3. **Manual override:** Tappable mode badge in status bar (`COCKPIT` / `OFFLINE`) opens modal
 
 **Mode transition notifications:** Non-blocking blue banner: "Switched to Cockpit Mode — Pi detected" (auto-dismisses after 5 seconds).
 
-| ID      | Requirement                                                        | Priority |
-| ------- | ------------------------------------------------------------------ | -------- |
+| ID      | Requirement                                                        | Priority | Status |
+| ------- | ------------------------------------------------------------------ | -------- | ------ |
 | MODE-01 | Network probe to detect Pi (192.168.10.1) with 2-second timeout   | P1       | ✅ |
-| MODE-02 | Network probe to detect internet via Cloudflare Worker health endpoint | P1   | ✅ |
-| MODE-03 | Automatic mode switching with 30-second re-probe interval         | P1       | ✅ |
+| MODE-02 | Planning app hosted on Vercel at `flywhere.app/plan`               | P1       | ✅ |
+| MODE-03 | Cockpit PWA re-probe interval (30 seconds) for Pi detection       | P1       | ✅ |
 | MODE-04 | Manual mode override via tappable status bar badge                | P1       | ✅ (modal with selectable modes, 5-min override duration) |
 | MODE-05 | Mode transition notification (non-blocking blue banner, 5s dismiss) | P1     | ✅ |
 | MODE-06 | Mode state persisted in localStorage for instant startup          | P1       | ✅ |
 
-#### 5.7.2 Planning Mode Architecture
+#### 5.7.2 Planning App Architecture (Vercel)
 
 ```
-  iPad (Planning Mode — on home/FBO WiFi)
+  Any Browser (Planning — flywhere.app/plan)
 ┌───────────────────────────────────────────────────────────┐
 │                                                            │
-│  PilotStation PWA (Safari / Home Screen)                  │
-│  ├── Mode Detector (network probes every 30s)             │
+│  PilotStation Planning App                                │
 │  ├── Planning Workflow UI (6-step guided flow)            │
-│  ├── IndexedDB Store                                      │
+│  ├── Vercel Postgres                                      │
+│  │   ├── Aircraft profiles                               │
+│  │   ├── Flight plans + packages                         │
+│  │   ├── W&B scenarios                                   │
+│  │   └── Planning workflow state                         │
+│  ├── Client-side IndexedDB (local cache)                  │
 │  │   ├── NASR cache (airports, navaids, airways, airspace)│
 │  │   ├── Weather cache (METARs, TAFs, winds, PIREPs)     │
-│  │   ├── Flight plan package (staged for upload)         │
-│  │   ├── W&B scenarios                                   │
 │  │   └── Fuel prices                                     │
-│  ├── Service Worker (dual-mode caching)                  │
-│  └── API Client → Cloudflare Worker Proxy                │
-│                         │                                  │
-│                         ▼                                  │
-│           Cloudflare Worker (pilotstation-api.workers.dev) │
-│           ├── /claude       → api.anthropic.com             │
-│           ├── /wx/*         → aviationweather.gov          │
-│           ├── /fuel-prices  → aviation-fuel-prices.com     │
-│           ├── /fp/*         → lmfsweb.afss.com (filing)    │
-│           └── /briefing     → lmfsweb.afss.com (briefing)  │
+│  ├── Service Worker (offline caching for full workflow)   │
+│  └── Vercel API Routes (server-side)                     │
+│       ├── /api/claude    → api.anthropic.com              │
+│       ├── /api/wx/*      → aviationweather.gov           │
+│       ├── /api/fuel      → aviation-fuel-prices.com      │
+│       ├── /api/fp/*      → lmfsweb.afss.com (filing)     │
+│       └── /api/briefing  → lmfsweb.afss.com (briefing)   │
 │                                                            │
 └───────────────────────────────────────────────────────────┘
 ```
 
-**IndexedDB storage budget:**
+**Vercel Postgres storage:**
+
+Flight plans, aircraft profiles, W&B scenarios, and planning workflow state are persisted in Vercel Postgres, enabling access from any device and eliminating IndexedDB-only storage limitations.
+
+**Client-side IndexedDB cache (supplemental):**
 
 | Data                            | Size (compressed) | Purpose                          |
 | ------------------------------- | ----------------- | -------------------------------- |
@@ -548,41 +559,58 @@ PilotStation is a single PWA that operates in different modes depending on the i
 | NASR navaids + airways          | ~3 MB             | Route planning with airways      |
 | NASR airspace boundaries        | ~4 MB             | Airspace awareness               |
 | Weather cache (route)           | ~0.1 MB           | METARs, TAFs, winds, PIREPs     |
-| Flight plan package             | ~0.01 MB          | Staged plan for upload           |
 | Fuel prices                     | ~0.5 MB           | Fuel stop comparison             |
 | AI briefing results             | ~0.01 MB          | Cached Claude analysis           |
-| **Total**                       | **~16 MB**        | Well within Safari's 500 MB limit |
+| **Total**                       | **~16 MB**        | Local performance cache          |
 
-#### 5.7.3 Mode Transition & Data Sync
+#### 5.7.3 Planning → Cockpit Data Sync
 
-When the PWA detects a transition from Planning Mode (or Offline Mode) to Cockpit Mode, it offers to upload the staged flight plan package.
+When the cockpit PWA detects the Pi (Cockpit Mode), it syncs the latest flight plan package created in the Vercel planning app.
 
 **Sync protocol:**
 
-1. Mode detection fires "Pi reachable" event
-2. PWA checks IndexedDB for a staged flight plan package
-3. If package exists and is newer than last sync (`GET /api/plan/sync-status`), a confirmation toast appears: "Flight plan KLKR → KLWA ready to upload. [UPLOAD NOW] [LATER]"
-4. Auto-upload after 10 seconds if no response (pilot may be doing preflight)
-5. PWA POSTs package to `POST /api/plan/upload-package`
-6. On success: "Flight plan uploaded. Weather cached at 14:30Z."
-7. Pi makes the flight plan active — route on map, weather in cache, W&B in PLAN view
+1. Pilot completes planning at `flywhere.app/plan` → flight plan package saved to Vercel Postgres
+2. At aircraft: iPad connects to Stratux WiFi → cockpit PWA detects Pi
+3. Cockpit PWA checks for a staged flight plan package (from local IndexedDB cache or fetched from Vercel if internet was recently available)
+4. If package exists and is newer than last sync (`GET /api/plan/sync-status`), a confirmation toast appears: "Flight plan KLKR → KLWA ready to upload. [UPLOAD NOW] [LATER]"
+5. Auto-upload after 10 seconds if no response (pilot may be doing preflight)
+6. Cockpit PWA POSTs package to `POST /api/plan/upload-package`
+7. On success: "Flight plan uploaded. Weather cached at 14:30Z."
+8. Pi makes the flight plan active — route on map, weather in cache, W&B in PLAN view
 
 **Flight plan package format (JSON):**
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "created_at": "2026-02-11T14:30:00Z",
-  "aircraft_id": "pa28-cherokee",
+  "aircraft_id": "rv9a",
+  "fuel_state": {
+    "source": "tic_measurement",
+    "measured_at": "2026-02-11T14:15:00Z",
+    "left_tank_tic": 12.5,
+    "right_tank_tic": 11.0,
+    "left_tank_gal": 14.2,
+    "right_tank_gal": 12.8,
+    "total_measured_gal": 27.0,
+    "edm_last_flight_gal": 24.3,
+    "variance_gal": 2.7,
+    "variance_pct": 11.1,
+    "selected_fuel_gal": 27.0,
+    "burn_profile": "75% Cruise",
+    "fuel_additions": [
+      { "airport": "KGSP", "gallons": 15.0, "after_leg": 1 }
+    ]
+  },
   "flight_plan": {
     "departure": "KLKR",
     "destination": "KLWA",
     "route": ["KLKR", "V16", "GSP", "V20", "AVL", "KLWA"],
     "altitude": 8000,
     "legs": [
-      { "from": "KLKR", "to": "GSP", "via": "V16", "dist_nm": 89, "mag_hdg": 254, "ete_min": 39, "fuel_gal": 5.1 },
-      { "from": "GSP", "to": "AVL", "via": "V20", "dist_nm": 62, "mag_hdg": 278, "ete_min": 27, "fuel_gal": 3.5 },
-      { "from": "AVL", "to": "KLWA", "via": "DIR", "dist_nm": 377, "mag_hdg": 261, "ete_min": 164, "fuel_gal": 22.4 }
+      { "from": "KLKR", "to": "GSP", "via": "V16", "dist_nm": 89, "mag_hdg": 254, "ete_min": 39, "fuel_gal": 5.1, "fuel_start": 27.0, "fuel_remain": 21.9 },
+      { "from": "GSP", "to": "AVL", "via": "V20", "dist_nm": 62, "mag_hdg": 278, "ete_min": 27, "fuel_gal": 3.5, "fuel_start": 36.9, "fuel_remain": 33.4 },
+      { "from": "AVL", "to": "KLWA", "via": "DIR", "dist_nm": 377, "mag_hdg": 261, "ete_min": 164, "fuel_gal": 22.4, "fuel_start": 33.4, "fuel_remain": 11.0 }
     ]
   },
   "weather_cache": {
@@ -595,17 +623,16 @@ When the PWA detects a transition from Planning Mode (or Offline Mode) to Cockpi
     "tfrs": []
   },
   "weight_balance": {
-    "scenario_name": "Two pax, full fuel",
+    "scenario_name": "Two pax, measured fuel",
     "stations": [
-      { "name": "Pilot & Front Pax", "weight": 340, "arm": 85.5, "moment": 29070 },
-      { "name": "Rear Passengers", "weight": 180, "arm": 118.1, "moment": 21258 },
-      { "name": "Baggage", "weight": 25, "arm": 142.8, "moment": 3570 },
-      { "name": "Fuel (50 gal)", "weight": 300, "arm": 95.0, "moment": 28500 }
+      { "name": "Pilot & Front Pax", "weight": 340, "arm": 82.0, "moment": 27880 },
+      { "name": "Baggage", "weight": 25, "arm": 108.0, "moment": 2700 },
+      { "name": "Fuel (27.0 gal)", "weight": 162, "arm": 75.0, "moment": 12150 }
     ],
-    "takeoff_weight": 2070,
-    "takeoff_cg": 90.9,
-    "landing_weight": 1884,
-    "landing_cg": 90.5,
+    "takeoff_weight": 1527,
+    "takeoff_cg": 82.1,
+    "landing_weight": 1393,
+    "landing_cg": 82.0,
     "in_envelope": true
   },
   "ai_briefing": {
@@ -634,24 +661,25 @@ When the PWA detects a transition from Planning Mode (or Offline Mode) to Cockpi
 }
 ```
 
-| ID     | Requirement                                                            | Priority |
-| ------ | ---------------------------------------------------------------------- | -------- |
-| SYNC-01 | Auto-detect staged flight plan package on mode transition to Cockpit  | P1       | ✅ (client-side; Pi endpoints need Phase 1b) |
+| ID     | Requirement                                                            | Priority | Status |
+| ------ | ---------------------------------------------------------------------- | -------- | ------ |
+| SYNC-01 | Cockpit PWA detects staged flight plan package and offers upload to Pi | P1       | ✅ (client-side; Pi endpoints need Phase 1b) |
 | SYNC-02 | Confirmation toast with 10-second auto-upload default                 | P1       | ✅ (client-side) |
 | SYNC-03 | Upload progress indicator                                             | P1       | ✅ (client-side) |
 | SYNC-04 | Retry with exponential backoff on upload failure                      | P1       | ✅ (1s/2s/4s backoff) |
 | SYNC-05 | NASR data sync from Pi to IndexedDB when on Stratux WiFi             | P1       | ✅ (client-side; Pi endpoints need Phase 1b) |
 | SYNC-06 | Sync status indicator: last sync timestamp, data freshness            | P1       | ✅ (client-side) |
+| SYNC-07 | Flight plan packages persist in Vercel Postgres for cross-device access | P1     | ✅ |
 
-#### 5.7.4 Shared UI Shell
+#### 5.7.4 UI Layouts
 
-Both modes share the same PWA shell (status bar at top, nav bar at bottom). The nav bar and status bar adapt per mode:
+The planning app and cockpit PWA have independent UI shells optimized for their respective contexts.
 
-**Planning Mode:**
+**Planning App (`flywhere.app/plan`):**
 
 ```
 ┌───────────────────────────────────────────────────────────┐
-│ PLANNING │ PA-28 N1234 │ KLKR → KLWA │ WX 14:30Z │ MODE▼│
+│ PLANNING │ PA-28 N1234 │ KLKR → KLWA │ WX 14:30Z        │
 ├───────────────────────────────────────────────────────────┤
 │                                                            │
 │                    PRIMARY VIEW                            │
@@ -662,7 +690,7 @@ Both modes share the same PWA shell (status bar at top, nav bar at bottom). The 
 └───────────────────────────────────────────────────────────┘
 ```
 
-**Cockpit Mode (unchanged):**
+**Cockpit PWA (`192.168.10.1`):**
 
 ```
 ┌───────────────────────────────────────────────────────────┐
@@ -677,51 +705,88 @@ Both modes share the same PWA shell (status bar at top, nav bar at bottom). The 
 └───────────────────────────────────────────────────────────┘
 ```
 
-**Planning Mode visual design:** Planning Mode uses a light color scheme since the pilot is at home or in an FBO — indoor lighting, not cockpit sunlight. Aviation-standard colors (VFR green, MVFR blue, IFR red, LIFR magenta) remain identical across modes.
+**Planning app visual design:** The planning app uses a light color scheme since the pilot is at home or in an FBO — indoor lighting, not cockpit sunlight. Aviation-standard colors (VFR green, MVFR blue, IFR red, LIFR magenta) remain identical across both apps.
 
-| Token              | Planning Mode        | Cockpit Mode (unchanged) |
-| ------------------ | -------------------- | ------------------------ |
-| `--bg-primary`     | `#ffffff` (white)    | `#1a1a2e` (dark navy)    |
-| `--bg-surface`     | `#f5f5f5` (light gray) | `#16213e` (dark blue)  |
-| `--text-primary`   | `#1a1a2e` (dark navy) | `#ffffff`               |
-| `--text-secondary` | `#666666`            | `#a0a0a0`               |
-| `--accent`         | `#0066cc` (blue)     | `#00d4ff` (cyan)        |
+| Token              | Planning App (flywhere.app) | Cockpit PWA (unchanged) |
+| ------------------ | --------------------------- | ----------------------- |
+| `--bg-primary`     | `#ffffff` (white)           | `#1a1a2e` (dark navy)   |
+| `--bg-surface`     | `#f5f5f5` (light gray)      | `#16213e` (dark blue)   |
+| `--text-primary`   | `#1a1a2e` (dark navy)       | `#ffffff`                |
+| `--text-secondary` | `#666666`                   | `#a0a0a0`                |
+| `--accent`         | `#0066cc` (blue)            | `#00d4ff` (cyan)         |
 
-**Service worker strategy:** The service worker caches static assets (HTML, JS, CSS) for both modes on install. Structured data (NASR, weather, flight plans) is stored in IndexedDB, not the service worker cache, because it needs to be queried. The service worker intercepts API calls and routes them based on mode: to `192.168.10.1` in Cockpit Mode, to `pilotstation-api.workers.dev` in Planning Mode.
+#### 5.7.5 Offline Architecture
 
-### 5.8 Cloudflare Worker Proxy — IMPLEMENTED ✓
+Both the planning app and cockpit PWA are designed to work offline. This is critical because:
+- **At the aircraft**: The pilot may have no cell service when measuring fuel tic marks and reviewing the flight plan
+- **In flight**: The cockpit PWA is always offline (Stratux WiFi only, no internet)
 
-**The problem:** The PilotStation PWA runs in Safari on the iPad. Browser security (CORS) prevents direct API calls from the browser to `aviationweather.gov` and `api.anthropic.com`. Additionally, the Anthropic API key must not be stored in client-side code.
+**Planning app (`flywhere.app/plan`) offline strategy:**
 
-**The solution:** A Cloudflare Worker (`pilotstation-worker/src/index.js`, 201 lines) acts as a CORS-enabled proxy. It runs on Cloudflare's free tier (100,000 requests/day — far exceeding aviation planning needs).
+The planning app uses a **service worker** to cache the full 6-step workflow (HTML, JS, CSS) and **IndexedDB** for structured data. When online, data syncs to/from Vercel Postgres. When offline, the app operates entirely from local cache.
 
-**Worker routes:**
+| Data | Online source | Offline source | Sync direction |
+| ---- | ------------- | -------------- | -------------- |
+| Planning workflow UI | Vercel CDN | Service worker cache | Vercel → SW cache |
+| Aircraft profiles (incl. tic polynomial) | Vercel Postgres | IndexedDB | Bidirectional |
+| Flight plan packages | Vercel Postgres | IndexedDB | Bidirectional |
+| W&B scenarios | Vercel Postgres | IndexedDB | Bidirectional |
+| NASR data (airports, navaids, airways) | Vercel Postgres | IndexedDB | Vercel → IDB |
+| Weather cache | Vercel API routes → AWC | IndexedDB (stale) | Online only (shows staleness warning) |
+| Fuel measurements + tic history | Vercel Postgres | IndexedDB | Bidirectional |
+| Burn rate profiles | Vercel Postgres (in aircraft profile) | IndexedDB | Bidirectional |
+| Fuel prices | Vercel API routes | IndexedDB (stale) | Online only |
 
-| Route                    | Proxies to                                    | Purpose                    |
-| ------------------------ | --------------------------------------------- | -------------------------- |
-| `POST /claude`           | `api.anthropic.com/v1/messages`               | AI copilot (Claude API)    |
-| `GET /wx/metar?ids=...`  | `aviationweather.gov/api/data/metar`          | METARs                     |
-| `GET /wx/taf?ids=...`    | `aviationweather.gov/api/data/taf`            | TAFs                       |
-| `GET /wx/pirep?...`      | `aviationweather.gov/api/data/pirep`          | PIREPs                     |
-| `GET /wx/airsigmet?...`  | `aviationweather.gov/api/data/airsigmet`      | SIGMETs/AIRMETs            |
-| `GET /wx/windtemp?...`   | `aviationweather.gov/api/data/windtemp`       | Winds aloft (FB)           |
-| `GET /wx/notam?...`      | `notams.aim.faa.gov/notamSearch`              | NOTAMs                     |
-| `GET /fuel-prices?...`   | `aviation-fuel-prices.com` API                | 100LL/Jet-A prices         |
-| `POST /fp/file`          | `lmfsweb.afss.com/Website/FP/file`            | File flight plan           |
-| `POST /fp/{id}/amend`    | `lmfsweb.afss.com/Website/FP/{id}/amend`      | Amend filed flight plan    |
-| `POST /fp/{id}/cancel`   | `lmfsweb.afss.com/Website/FP/{id}/cancel`     | Cancel filed flight plan   |
-| `POST /fp/{id}/close`    | `lmfsweb.afss.com/Website/FP/{id}/close`      | Close flight plan          |
-| `POST /briefing`         | `lmfsweb.afss.com/Website/briefing`           | Official weather briefing  |
-| `GET /health`            | Returns `{ "status": "ok" }`                  | Mode detection probe       |
+**Offline-capable features (no internet required):**
+- Fuel tic mark measurement and polynomial conversion
+- EDM comparison (last flight value cached in IndexedDB)
+- Flight duration / range calculations from burn profiles
+- Route review and fuel carry-forward calculations
+- W&B calculations
+- Full planning workflow navigation and data entry
+- Flight plan package review and local staging
+
+**Online-required features:**
+- Weather fetch (METARs, TAFs, winds, PIREPs)
+- Flight plan filing via 1800wxbrief
+- AI copilot (Claude API)
+- Sync to/from Vercel Postgres
+
+**Service worker caching strategy:** Cache-first for static assets (HTML, JS, CSS), network-first for API calls with IndexedDB fallback. Background sync pushes local changes to Vercel Postgres when connectivity returns.
+
+**Cockpit PWA (`192.168.10.1`) offline strategy:** The service worker caches static assets (HTML, JS, CSS) on install. Structured data (NASR, weather, flight plans) is stored in IndexedDB. The service worker intercepts API calls and routes them to `192.168.10.1` in Cockpit Mode.
+
+### 5.8 Vercel API Routes — IMPLEMENTED ✓
+
+**The problem:** Browser security (CORS) prevents direct client-side API calls to `aviationweather.gov` and `api.anthropic.com`. Additionally, the Anthropic API key and Leidos credentials must not be stored in client-side code.
+
+**The solution:** Vercel API Routes (server-side functions) in the `flywhere.app` deployment handle all external API calls. Since these run server-side, there are no CORS issues and API keys are stored as Vercel environment variables. No separate proxy service (e.g., Cloudflare Worker) is needed.
+
+**Vercel API routes:**
+
+| Route                         | Proxies to                                    | Purpose                    |
+| ----------------------------- | --------------------------------------------- | -------------------------- |
+| `POST /api/claude`            | `api.anthropic.com/v1/messages`               | AI copilot (Claude API)    |
+| `GET /api/wx/metar?ids=...`   | `aviationweather.gov/api/data/metar`          | METARs                     |
+| `GET /api/wx/taf?ids=...`     | `aviationweather.gov/api/data/taf`            | TAFs                       |
+| `GET /api/wx/pirep?...`       | `aviationweather.gov/api/data/pirep`          | PIREPs                     |
+| `GET /api/wx/airsigmet?...`   | `aviationweather.gov/api/data/airsigmet`      | SIGMETs/AIRMETs            |
+| `GET /api/wx/windtemp?...`    | `aviationweather.gov/api/data/windtemp`       | Winds aloft (FB)           |
+| `GET /api/wx/notam?...`       | `notams.aim.faa.gov/notamSearch`              | NOTAMs                     |
+| `GET /api/fuel-prices?...`    | `aviation-fuel-prices.com` API                | 100LL/Jet-A prices         |
+| `POST /api/fp/file`           | `lmfsweb.afss.com/Website/FP/file`            | File flight plan           |
+| `POST /api/fp/{id}/amend`     | `lmfsweb.afss.com/Website/FP/{id}/amend`      | Amend filed flight plan    |
+| `POST /api/fp/{id}/cancel`    | `lmfsweb.afss.com/Website/FP/{id}/cancel`     | Cancel filed flight plan   |
+| `POST /api/fp/{id}/close`     | `lmfsweb.afss.com/Website/FP/{id}/close`      | Close flight plan          |
+| `POST /api/briefing`          | `lmfsweb.afss.com/Website/briefing`           | Official weather briefing  |
 
 **Security:**
 
-- **API keys:** Stored as Cloudflare Worker secrets: `ANTHROPIC_API_KEY`, `LEIDOS_VENDOR_ID`, `LEIDOS_VENDOR_PASSWORD`. Never sent to the browser.
-- **Rate limiting:** 20 requests/minute to `/claude`, 60 requests/minute to `/wx/*`, 10 requests/minute to `/fp/*` and `/briefing`
-- **Origin validation:** Worker checks the `Origin` header and only accepts requests from the PWA's origin (or `null` for home-screen PWAs)
-- **Request validation:** `/claude` endpoint validates max_tokens is bounded (≤4096) and model is allowed
+- **API keys:** Stored as Vercel environment variables: `ANTHROPIC_API_KEY`, `LEIDOS_VENDOR_ID`, `LEIDOS_VENDOR_PASSWORD`. Never sent to the browser.
+- **Rate limiting:** 20 requests/minute to `/api/claude`, 60 requests/minute to `/api/wx/*`, 10 requests/minute to `/api/fp/*` and `/api/briefing`
+- **Request validation:** `/api/claude` endpoint validates max_tokens is bounded (≤4096) and model is allowed
 
-**Deployment:** Single `wrangler.toml` + `src/index.js` file (201 lines). Deployed to `pilotstation-api.<your-domain>.workers.dev`. Updated independently of PilotStation. **Implementation includes** per-category rate limiting (60 wx/min, 10 filing/min, 20 AI/min), in-memory rate limit state tracking, CORS preflight handling, and basic auth for 1800wxbrief Leidos credentials from environment variables.
+**Deployment:** Planning app deployed to `flywhere.app` with API routes at `flywhere.app/api/*`. Vercel Postgres for persistent storage. API keys stored as Vercel environment variables. Rate limiting implemented in Vercel middleware.
 
 **Estimated Claude API cost per planning session:**
 
@@ -974,24 +1039,111 @@ Lcl Date,Lcl Time,UTCOfst,Longitude,Latitude,AltGPS,GndSpd,Roll,Pitch,CRS,E1 MAP
 
 ### 6.3 Module: Fuel Management (P0 — MVP)
 
-**Source:** Existing fuel planner PWA + engine_monitor.py fuel tracking — unified
+**Source:** Existing fuel planner PWA (`capture_v5/fuel-planner.js` v3.3.0) + engine_monitor.py fuel tracking — unified into both the planning app (`flywhere.app/plan`) and cockpit PWA.
 
-| ID      | Requirement                                                        | Priority |
-| ------- | ------------------------------------------------------------------ | -------- |
-| FUEL-01 | Real-time fuel remaining from EDM fuel flow integration            | P0       |
-| FUEL-02 | Visual fuel gauge (tank graphic with level indicator)              | P0       |
-| FUEL-03 | Endurance remaining (hours:minutes at current burn rate)           | P0       |
-| FUEL-04 | Range remaining (nm at current GS and burn rate)                   | P0       |
-| FUEL-05 | Fuel warning thresholds: yellow at 8 gal, red at 4 gal             | P0       |
-| FUEL-06 | Pre-flight fuel tic measurements with polynomial calibration       | P0       |
-| FUEL-07 | Fuel addition logging (gallons, airport, price, timestamp)         | P0       |
-| FUEL-08 | K-factor calibration tracking (EI FT-60 Red Cube)                  | P1       |
-| FUEL-09 | Burn rate profiles (65% LOP, 75% power, etc.) for planning         | P0       |
-| FUEL-10 | EDM vs. manual tic comparison for cross-checking                   | P1       |
-| FUEL-11 | Fuel status always visible in bottom of right panel from ALL views | P0       |
-| FUEL-12 | Offline capability — full function without network connection      | P0       |
+The fuel planner is integrated into the planning app for pre-flight fuel verification and route fuel planning, and into the cockpit PWA for in-flight fuel monitoring. **All fuel features work offline** via service worker + IndexedDB — critical because pre-flight fuel measurement at the aircraft often has no internet.
 
-**Right panel fuel strip (always visible):**
+#### 6.3.1 Core Fuel Requirements
+
+| ID      | Requirement                                                        | Priority | Where |
+| ------- | ------------------------------------------------------------------ | -------- | ----- |
+| FUEL-01 | Real-time fuel remaining from EDM fuel flow integration            | P0       | Cockpit |
+| FUEL-02 | Visual fuel gauge (tank graphic with level indicator)              | P0       | Both |
+| FUEL-03 | Endurance remaining (hours:minutes at current burn rate)           | P0       | Both |
+| FUEL-04 | Range remaining (nm at current GS and burn rate)                   | P0       | Both |
+| FUEL-05 | Fuel warning thresholds: yellow at 8 gal, red at 4 gal             | P0       | Both |
+| FUEL-06 | Pre-flight fuel tic measurements with polynomial calibration       | P0       | Planning |
+| FUEL-07 | Fuel addition logging (gallons, airport, price, timestamp)         | P0       | Both |
+| FUEL-08 | K-factor calibration tracking (EI FT-60 Red Cube)                  | P1       | Cockpit |
+| FUEL-09 | Burn rate profiles (65% LOP, 75% power, etc.) for planning         | P0       | Both |
+| FUEL-10 | EDM vs. manual tic comparison for cross-checking                   | P0       | Planning |
+| FUEL-11 | Fuel status always visible in bottom of right panel from ALL views | P0       | Cockpit |
+| FUEL-12 | Offline capability — full function without network connection      | P0       | Both |
+| FUEL-13 | **Fuel carry-forward**: auto-deduct fuel burned per leg in multi-leg routes, with pilot override for fuel stops | P0 | Planning |
+| FUEL-14 | Per-aircraft fuel tank calibration (tic mark polynomial coefficients stored per aircraft profile) | P0 | Planning |
+| FUEL-15 | Last-flight EDM fuel state carried forward as starting point for next flight planning | P0 | Planning |
+
+#### 6.3.2 Tic Mark Calibration & Pre-Flight Verification (Planning App)
+
+The RV-9A fuel tanks use visual tic marks for preflight fuel measurement. A per-aircraft 5th-degree polynomial converts tic mark readings to gallons:
+
+```
+gallons = a5×tic⁵ + a4×tic⁴ + a3×tic³ + a2×tic² + a1×tic + a0
+```
+
+Polynomial coefficients are stored in the aircraft profile (Vercel Postgres + IndexedDB cache) and are aircraft-specific. The tic calibration workflow runs entirely offline:
+
+**Pre-flight fuel verification workflow:**
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│ PRE-FLIGHT FUEL CHECK (offline-capable)                       │
+│                                                               │
+│ Last flight EDM reading: 24.3 gal (from 2026-02-12 flight)  │
+│                                                               │
+│ LEFT TANK          RIGHT TANK                                │
+│ Tic marks: [12.5]  Tic marks: [11.0]                        │
+│ = 14.2 gal         = 12.8 gal                               │
+│                                                               │
+│ MEASURED TOTAL: 27.0 gal                                     │
+│ EDM LAST FLIGHT:  24.3 gal                                   │
+│ VARIANCE:         +2.7 gal (11.1%)  ⚠ CHECK                │
+│                                                               │
+│ [USE MEASURED: 27.0 gal]  [USE EDM: 24.3 gal]  [CUSTOM]    │
+│                                                               │
+│ Selected fuel feeds into route planning fuel calculations     │
+└──────────────────────────────────────────────────────────────┘
+```
+
+The pilot measures tic marks at the aircraft (no internet needed), and the app:
+1. Converts tic marks → gallons via the polynomial
+2. Compares to the EDM reading from the last flight (synced from cockpit PWA → Vercel Postgres → planning app IndexedDB cache)
+3. Grades variance: excellent (<5%), good (5-10%), check (>10%)
+4. Pilot selects which fuel quantity to use for planning
+5. Selected fuel quantity feeds directly into Step 2 (Route) fuel calculations
+
+#### 6.3.3 Fuel Carry-Forward in Multi-Leg Routes
+
+For multi-leg routes, fuel burned on each leg auto-deducts from the starting fuel for the next leg. The pilot can override at any fuel stop:
+
+```
+KLKR → KGSP → KAVL → KLWA (3 legs)
+
+Leg 1: KLKR → KGSP    Start: 27.0 gal  Burn: 5.1 gal  Remain: 21.9 gal
+                        [+Add fuel at KGSP? _____ gal]
+Leg 2: KGSP → KAVL    Start: 21.9 gal  Burn: 3.5 gal  Remain: 18.4 gal
+Leg 3: KAVL → KLWA    Start: 18.4 gal  Burn: 8.2 gal  Remain: 10.2 gal
+
+Reserve: 10.2 gal = 1:04 @ 9.5 GPH ✅ (> 45 min VFR minimum)
+```
+
+If the pilot adds fuel at a stop, the app recalculates all downstream legs. The fuel carry-forward integrates with:
+- **Step 2 (Route)**: Phase-of-flight fuel model (Taxi→Climb→Cruise→Descent per leg)
+- **Step 4 (W&B)**: Landing weight recalculated per leg with actual fuel burn
+- **Step 5 (Briefing)**: Reserve warnings per leg, not just total
+
+#### 6.3.4 Burn Rate Profiles (Per-Aircraft)
+
+Stored in the aircraft profile, used by both planning and cockpit:
+
+| Profile          | GPH  | KTAS | Use case                    |
+| ---------------- | ---- | ---- | --------------------------- |
+| 65% Cruise LOP   | 8.0  | 135  | Economy cruise (RV-9A)      |
+| 75% Cruise       | 9.5  | 145  | Normal cruise (RV-9A)       |
+| 65% Cruise ROP   | 9.8  | 140  | Rich of peak cruise         |
+| Pattern Work     | 10.0 | 90   | Local/training flights      |
+| Custom           | user | user | Pilot-defined               |
+
+Phase-of-flight profiles (from `route-step.js`):
+
+| Phase    | GPH  | IAS   | Rate     | Source |
+| -------- | ---- | ----- | -------- | ------ |
+| Taxi     | 1.5  | —     | 10 min   | Default |
+| Climb    | 11.0 | 100kt | 700 fpm  | O-320 POH |
+| Cruise   | 9.5  | 145kt | —        | Profile-dependent |
+| Descent  | 6.0  | 120kt | 500 fpm  | O-320 POH |
+
+**Right panel fuel strip (always visible in cockpit):**
 
 ```
 ┌─────────────┐
@@ -1082,7 +1234,7 @@ FL180 ┤                    ╱‾‾‾╲ Class B          ▒▒ = Icing
 
 #### 6.4.4 Smart Briefing — Condensed, Mission-Critical (P1)
 
-Standard 1800wxbrief briefings can be 70+ pages. PilotStation generates a **condensed, route-specific briefing** focused on what matters for this flight. **Note:** In Planning Mode (home WiFi), this briefing is enhanced with AI-powered weather analysis, go/no-go reasoning, and NOTAM filtering — see Section 6.12 and Section 7.4 (Step 5 mockup) for the AI-enhanced version.
+Standard 1800wxbrief briefings can be 70+ pages. PilotStation generates a **condensed, route-specific briefing** focused on what matters for this flight. **Note:** In the planning app (`flywhere.app/plan`), this briefing is enhanced with AI-powered weather analysis, go/no-go reasoning, and NOTAM filtering — see Section 6.12 and Section 7.4 (Step 5 mockup) for the AI-enhanced version.
 
 | ID    | Requirement                                                                                                                           | Priority |
 | ----- | ------------------------------------------------------------------------------------------------------------------------------------- | -------- |
@@ -1128,12 +1280,12 @@ Standard 1800wxbrief briefings can be 70+ pages. PilotStation generates a **cond
 
 | Source                  | URL                                      | Content                       | When                                    |
 | ----------------------- | ---------------------------------------- | ----------------------------- | --------------------------------------- |
-| Aviation Weather Center | `aviationweather.gov/api/data/metar`     | METARs                        | Planning Mode via Cloudflare Worker     |
-| Aviation Weather Center | `aviationweather.gov/api/data/taf`       | TAFs                          | Planning Mode via Cloudflare Worker     |
-| Aviation Weather Center | `aviationweather.gov/api/data/pirep`     | PIREPs                        | Planning Mode via Cloudflare Worker     |
-| Aviation Weather Center | `aviationweather.gov/api/data/airsigmet` | SIGMETs/AIRMETs               | Planning Mode via Cloudflare Worker     |
-| Aviation Weather Center | `aviationweather.gov/api/data/windtemp`  | Winds aloft (FB)              | Planning Mode via Cloudflare Worker     |
-| FAA NOTAM Search        | `notams.aim.faa.gov/notamSearch`         | NOTAMs                        | Planning Mode via Cloudflare Worker     |
+| Aviation Weather Center | `aviationweather.gov/api/data/metar`     | METARs                        | Planning app via Vercel API routes      |
+| Aviation Weather Center | `aviationweather.gov/api/data/taf`       | TAFs                          | Planning app via Vercel API routes      |
+| Aviation Weather Center | `aviationweather.gov/api/data/pirep`     | PIREPs                        | Planning app via Vercel API routes      |
+| Aviation Weather Center | `aviationweather.gov/api/data/airsigmet` | SIGMETs/AIRMETs               | Planning app via Vercel API routes      |
+| Aviation Weather Center | `aviationweather.gov/api/data/windtemp`  | Winds aloft (FB)              | Planning app via Vercel API routes      |
+| FAA NOTAM Search        | `notams.aim.faa.gov/notamSearch`         | NOTAMs                        | Planning app via Vercel API routes      |
 | Stratux FIS-B           | `ws://192.168.10.1/weather`              | Live METARs/TAFs/PIREPs/Winds | In-flight (Cockpit Mode)                |
 | Stratux FIS-B           | GDL90 UDP 4000                           | NEXRAD radar                  | In-flight (Cockpit Mode)                |
 | Leidos 1800wxbrief      | REST API (`RouteBriefingRequest`)        | Official briefing             | Planning Mode (optional, requires acct) |
@@ -1160,7 +1312,7 @@ Standard 1800wxbrief briefings can be 70+ pages. PilotStation generates a **cond
 | FLT-14 | Integration with profile view (route defines the cross-section)                                                                                                       | P1       |
 | FLT-15 | Integration with Smart Briefing (route defines the weather corridor)                                                                                                  | P1       |
 
-**Implementation note (FLT-01 through FLT-07):** These features are implemented in the Planning Mode `route-step.js` module (1,079 lines). The implementation extends the original requirements with:
+**Implementation note (FLT-01 through FLT-07):** These features are implemented in the planning app's `route-step.js` module (1,079 lines). The implementation extends the original requirements with:
 
 - **Phase-of-flight fuel model**: Separate fuel burn calculations for Taxi, Climb, Cruise, and Descent phases with per-leg altitude awareness
 - **Per-leg altitude with phase tags**: Each leg is tagged as CLB (climb), CRZ (cruise), or DES (descent) based on altitude progression
@@ -1170,7 +1322,7 @@ Standard 1800wxbrief briefings can be 70+ pages. PilotStation generates a **cond
 
 Cockpit Mode implementation of these features is deferred to Phase 3.
 
-**Fuel price data source:** `aviation-fuel-prices.com` API (free, CC BY-NC-ND 4.0 license for non-commercial use). Returns JSON with 100LL/Jet-A prices by airport. Fetched in Planning Mode via Cloudflare Worker proxy (see Section 5.8), cached in IndexedDB, and included in the flight plan package uploaded to the Pi.
+**Fuel price data source:** `aviation-fuel-prices.com` API (free, CC BY-NC-ND 4.0 license for non-commercial use). Returns JSON with 100LL/Jet-A prices by airport. Fetched in the planning app via Vercel API routes (see Section 5.8), cached locally, and included in the flight plan package uploaded to the Pi.
 
 **Optimal altitude calculation:**
 
@@ -1211,7 +1363,7 @@ Filter: hemispheric rule (odd+500 eastbound, even+500 westbound for VFR)
 
 ### 6.5.1 AI Copilot Integration (P1)
 
-**Full specification in Section 6.12.** The AI copilot (Claude API via Cloudflare Worker) assists with flight planning in Planning Mode. Key functions: weather analysis, go/no-go reasoning against personal minimums, NOTAM filtering, route optimization, and alternate selection. Results are displayed in Planning Mode Step 5 (Briefing) and cached with the flight plan package for upload to the Pi.
+**Full specification in Section 6.12.** The AI copilot (Claude API via Vercel API routes) assists with flight planning at `flywhere.app/plan`. Key functions: weather analysis, go/no-go reasoning against personal minimums, NOTAM filtering, route optimization, and alternate selection. Results are displayed in planning Step 5 (Briefing) and cached with the flight plan package for upload to the Pi.
 
 **Important:** AI-generated recommendations are advisory only. PIC (Pilot in Command) retains all decision authority (see AI-10).
 
@@ -1402,16 +1554,16 @@ Toggle between these modes with a single tap.
 | UPD-05 | Upload terrain data updates from iPad to Pi                                      | P2       |
 | UPD-06 | Display current data versions and expiration dates on admin page                 | P0       |
 | UPD-07 | Warn pilot on startup if any data is expired (plates, charts, NASR)              | P0       |
-| UPD-08 | Pre-flight weather cache: fetch weather on home WiFi, push to Pi on Stratux WiFi — **now handled by PLAN-04 + SYNC-01; retained for cockpit-side weather push fallback** | P1       |
+| UPD-08 | Pre-flight weather cache: fetch weather via `flywhere.app/plan`, sync to Pi on Stratux WiFi — **now handled by PLAN-04 + SYNC-01; retained for cockpit-side weather push fallback** | P1       |
 
 **Update workflow:**
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│ STEP 1: At home / FBO (iPad on home/FBO WiFi, internet access) │
+│ STEP 1: At home / FBO (any device with internet access)          │
 │                                                                  │
-│  Option A: PilotStation PWA in Planning Mode (auto-activates     │
-│  when iPad is on home WiFi — fetches data via Cloudflare Worker) │
+│  Option A: flywhere.app/plan (Vercel-hosted planning app —       │
+│  accessible from any browser, fetches data via Vercel API routes)│
 │                                                                  │
 │  Option B: Desktop computer runs update script, prepares         │
 │  packages, transfers to iPad via AirDrop / iCloud / USB         │
@@ -1490,7 +1642,7 @@ Transfer of 3-5 GB chart tiles over Stratux WiFi (2.4 GHz) would take 15-30 minu
 
 ### 6.10 Module: Weight & Balance Calculator (P1)
 
-**Runs on the Pi (Cockpit Mode) or client-side in the browser (Planning Mode) — no internet required for calculation.** In Cockpit Mode, the Pi serves aircraft profiles and runs W&B via the API. In Planning Mode, `wb-calculator.js` performs the same calculations client-side using aircraft profiles synced to IndexedDB.
+**Runs on the Pi (Cockpit Mode) or client-side in the browser (planning app) — no internet required for calculation.** In Cockpit Mode, the Pi serves aircraft profiles and runs W&B via the API. In the planning app, `wb-calculator.js` performs the same calculations client-side using aircraft profiles from Vercel Postgres.
 
 | ID    | Requirement                                                                                 | Priority |
 | ----- | ------------------------------------------------------------------------------------------- | -------- |
@@ -1663,16 +1815,16 @@ Each aircraft is a JSON file stored on the boot partition (Tier 1 — always wri
 
 **Offline operation:** All aircraft profiles are JSON files stored on the Pi's boot partition (`/boot/firmware/pilotstation/aircraft/*.json` — Tier 1, always writable). No internet access needed — profiles are created/edited via the PilotStation settings UI or by uploading JSON from the iPad. The CG envelope diagram is rendered client-side by Chart.js in Safari.
 
-### 6.11 Module: Pre-Flight Planning Workflow — Planning Mode (P1) — COMPLETE ✓
+### 6.11 Module: Pre-Flight Planning Workflow (P1) — COMPLETE ✓
 
-**This module runs only in Planning Mode** (iPad on home/FBO WiFi with internet). It provides a 6-step guided workflow that integrates route planning, weather, W&B, fuel stops, and AI-powered briefing into a single sequential flow. Each step builds on the previous, and the final step packages everything for upload to the Pi.
+**This module runs on the Vercel-hosted planning app** at `flywhere.app/plan`, accessible from any internet-connected browser. It provides a 6-step guided workflow that integrates route planning, weather, W&B, fuel stops, and AI-powered briefing into a single sequential flow. Each step builds on the previous, and the final step packages everything for upload to the Pi. Planning state persists in Vercel Postgres for cross-device access.
 
 | ID      | Requirement                                                                                 | Priority | Status |
 | ------- | ------------------------------------------------------------------------------------------- | -------- | ------ |
 | PLAN-01 | 6-step guided planning workflow: Aircraft → Route → Weather → W&B → Briefing → Ready       | P1       | ✅ |
 | PLAN-02 | Dashboard view alternative showing all 6 panels simultaneously (toggle from guided flow)    | P2       | ✅ (pulled forward) |
-| PLAN-03 | Auto-save workflow progress to IndexedDB; resume on PWA reopen                              | P1       | ✅ |
-| PLAN-04 | Weather fetch from aviationweather.gov via Cloudflare Worker proxy for route corridor (25nm)| P1       | ✅ |
+| PLAN-03 | Auto-save workflow progress to Vercel Postgres; resume from any device                      | P1       | ✅ |
+| PLAN-04 | Weather fetch from aviationweather.gov via Vercel API routes for route corridor (25nm)      | P1       | ✅ |
 | PLAN-05 | Route planning using NASR airport/navaid/airway data from IndexedDB cache                   | P1       | ✅ |
 | PLAN-06 | Wind optimization: calculate GS at multiple altitudes, recommend optimal                    | P1       | ✅ |
 | PLAN-07 | Fuel stop planning with live fuel prices from aviation-fuel-prices.com                      | P1       | ⬜ |
@@ -1730,23 +1882,23 @@ Step 4: WEIGHT & BALANCE    Step 5: BRIEFING           Step 6: READY / FILE
 | ---- | --------------------------------------------- | ---------------------------------------------------------- | ------------------------ |
 | 1. Aircraft | Aircraft selection, passengers, baggage, fuel | Aircraft profile loaded, loading weights set              | IndexedDB (synced from Pi) |
 | 2. Route    | Departure, waypoints/airways, destination     | Legs with distance/heading/time/fuel, optimal altitude    | IndexedDB NASR cache     |
-| 3. Weather  | (auto from route)                             | METARs, TAFs, winds, PIREPs, NOTAMs, TFRs for corridor   | Cloudflare Worker → AWC  |
+| 3. Weather  | (auto from route)                             | METARs, TAFs, winds, PIREPs, NOTAMs, TFRs for corridor   | Vercel API routes → AWC  |
 | 4. W&B      | (auto from Steps 1+2)                         | CG envelope diagram, takeoff/landing weight & CG          | Client-side calculation  |
-| 5. Briefing | (auto from Steps 2+3)                         | Smart briefing, AI analysis, go/no-go, NOTAM highlights, official 1800wxbrief briefing with confirmation # | Cloudflare Worker → Claude + 1800wxbrief |
-| 6. Ready    | Flight rules, dep time, remarks, alternate    | Flight plan package assembled; file via 1800wxbrief; upload to Pi | Cloudflare Worker → 1800wxbrief + IndexedDB |
+| 5. Briefing | (auto from Steps 2+3)                         | Smart briefing, AI analysis, go/no-go, NOTAM highlights, official 1800wxbrief briefing with confirmation # | Vercel API routes → Claude + 1800wxbrief |
+| 6. Ready    | Flight rules, dep time, remarks, alternate    | Flight plan package assembled; file via 1800wxbrief; upload to Pi | Vercel API routes → 1800wxbrief + Vercel Postgres |
 
 **Dashboard view (P2):** Toggle button in top-right switches to a 2x3 grid showing all six panels in condensed form simultaneously. For experienced pilots who prefer the overview.
 
-### 6.12 Module: AI Copilot — Planning Mode (P1) — CLIENT-SIDE COMPLETE ✓
+### 6.12 Module: AI Copilot (P1) — CLIENT-SIDE COMPLETE ✓
 
-An AI copilot powered by the Claude API assists with pre-flight decision-making. It runs in Planning Mode only (requires internet to reach the Cloudflare Worker proxy). All AI outputs are advisory — PIC retains all decision authority.
+An AI copilot powered by the Claude API assists with pre-flight decision-making. It runs in the planning app at `flywhere.app/plan` (requires internet). API calls are routed through Vercel server-side API routes. All AI outputs are advisory — PIC retains all decision authority.
 
-**Implementation note:** The AI client (`ai-client.js`, 285 lines) and Cloudflare Worker `/claude` route were pulled forward from Phase 2 and implemented alongside Phase 1d. The client integrates with Claude Sonnet 4.5 and includes all AI-01 through AI-12 features. Step 5 UI integration for displaying AI analysis results is pending.
+**Implementation note:** The AI client (`ai-client.js`, 285 lines) and Vercel `/api/claude` route were pulled forward from Phase 2 and implemented alongside Phase 1d. The client integrates with Claude Sonnet 4.5 and includes all AI-01 through AI-12 features. Step 5 UI integration for displaying AI analysis results is pending.
 
 | ID    | Requirement                                                                                       | Priority | Status |
 | ----- | ------------------------------------------------------------------------------------------------- | -------- | ------ |
-| AI-01 | Cloudflare Worker proxy for Claude API with CORS support (see Section 5.8)                        | P1       | ✅ |
-| AI-02 | API key stored as Cloudflare Worker secret — never in PWA client code                             | P1       | ✅ |
+| AI-01 | Vercel API route for Claude API (server-side, see Section 5.8)                                    | P1       | ✅ |
+| AI-02 | API key stored as Vercel environment variable — never in client code                              | P1       | ✅ |
 | AI-03 | Rate limiting: 20 Claude requests/minute, origin validation                                       | P1       | ✅ |
 | AI-04 | **Weather analysis**: plain-English decode of METARs, TAFs, PIREPs for route                     | P1       | ✅ |
 | AI-05 | **Go/No-Go reasoning**: evaluate weather against personal minimums with detailed rationale         | P1       | ✅ |
@@ -1805,18 +1957,18 @@ The AI Go/No-Go function evaluates each weather parameter against these minimums
 
 **Source:** Leidos Flight Service Web Services API (`lmfsweb.afss.com`)
 
-PilotStation integrates with the FAA's 1800wxbrief (Leidos Flight Service) API to file VFR and IFR flight plans directly from the planning workflow and to obtain official weather briefings with a legal record. Filing and briefing happen in Planning Mode (requires internet); activation and closing use the traditional radio/phone method with PilotStation reminders in Cockpit Mode.
+PilotStation integrates with the FAA's 1800wxbrief (Leidos Flight Service) API to file VFR and IFR flight plans directly from the planning workflow and to obtain official weather briefings with a legal record. Filing and briefing happen in the planning app at `flywhere.app/plan` (requires internet); activation and closing use the traditional radio/phone method with PilotStation reminders in Cockpit Mode.
 
-**Implementation note:** The flight plan filer client (`flight-plan-filer.js`, 293 lines) and Cloudflare Worker routes (`/fp/*`, `/briefing`) are implemented. Filing, amendment, cancellation, and official briefing requests all route through the Cloudflare Worker with Leidos vendor credentials stored as Worker secrets. Step 6 UI (`ready-step.js`, 615 lines) auto-populates the filing form from previous steps. Cockpit Mode reminders (FILE-09, FILE-12) require Phase 1c/3.
+**Implementation note:** The flight plan filer client (`flight-plan-filer.js`, 293 lines) and Vercel API routes (`/api/fp/*`, `/api/briefing`) are implemented. Filing, amendment, cancellation, and official briefing requests all route through Vercel server-side functions with Leidos vendor credentials stored as Vercel environment variables. Step 6 UI (`ready-step.js`, 615 lines) auto-populates the filing form from previous steps. Cockpit Mode reminders (FILE-09, FILE-12) require Phase 1c/3.
 
 **Prerequisites:**
-- **Vendor registration:** The PilotStation developer registers with Leidos Flight Service for web services API access. Vendor credentials (vendor ID + password) are stored as Cloudflare Worker secrets.
-- **Pilot registration:** The pilot creates a free account at `1800wxbrief.com`. Their username is stored in `pilotstation.conf` and synced to IndexedDB for Planning Mode.
+- **Vendor registration:** The PilotStation developer registers with Leidos Flight Service for web services API access. Vendor credentials (vendor ID + password) are stored as Vercel environment variables.
+- **Pilot registration:** The pilot creates a free account at `1800wxbrief.com`. Their username is stored in `pilotstation.conf` and in Vercel Postgres for the planning app.
 
 | ID      | Requirement                                                                                                  | Priority |
 | ------- | ------------------------------------------------------------------------------------------------------------ | -------- |
 | FILE-01 | Vendor registration with Leidos Flight Service for API access                                                | P1       | ✅ |
-| FILE-02 | Vendor credentials (vendor ID + password) stored as Cloudflare Worker secrets                                | P1       | ✅ |
+| FILE-02 | Vendor credentials (vendor ID + password) stored as Vercel environment variables                             | P1       | ✅ |
 | FILE-03 | Pilot's 1800wxbrief username stored in `pilotstation.conf`, synced to IndexedDB                              | P1       | ✅ (client-side persistent storage) |
 | FILE-04 | **File VFR flight plan** from Step 6 (Ready) — auto-populate from planning workflow data                     | P1       | ✅ |
 | FILE-05 | **File IFR flight plan** from Step 6 (Ready) — includes alternate airport(s), equipment suffix               | P1       | ✅ |
@@ -1848,7 +2000,7 @@ PilotStation integrates with the FAA's 1800wxbrief (Leidos Flight Service) API t
 | Remarks                 | Pilot enters (Step 6)                                         |
 | Flight rules            | Pilot selects VFR or IFR (Step 6)                             |
 
-**API operations (via Cloudflare Worker proxy — see Section 5.8):**
+**API operations (via Vercel API routes — see Section 5.8):**
 
 | Operation    | Endpoint                        | When                                        | Notes                                               |
 | ------------ | ------------------------------- | ------------------------------------------- | --------------------------------------------------- |
@@ -2097,9 +2249,9 @@ Alerts overlay the current view with a non-blocking banner at top (below status 
 
 Dismiss: single tap anywhere on the banner. Large 48px dismiss target.
 
-### 7.4 Planning Mode Layouts
+### 7.4 Planning App Layouts (`flywhere.app/plan`)
 
-Planning Mode uses a light color scheme (see Section 5.7.4) with a step progress bar replacing the cockpit nav bar.
+The planning app uses a light color scheme (see Section 5.7.4) with a step progress bar as the primary navigation.
 
 #### Planning Mode — Step 2 (Route)
 
@@ -2453,9 +2605,9 @@ PilotStation data is split across four storage tiers to work with Stratux's over
 │   ├── flight_planner.py          # Route planning and calculations
 │   └── overlay_storage.py         # Tier-aware read/write abstraction (see 5.6)
 ├── web/
-│   ├── index.html                 # PilotStation PWA shell (both modes)
+│   ├── index.html                 # PilotStation cockpit PWA shell
 │   ├── app.js                     # Mode detection, view switching, layout
-│   ├── mode-detector.js           # Network probing, mode state machine (see 5.7.1)
+│   ├── mode-detector.js           # Network probing for Pi detection (see 5.7.1)
 │   ├── cockpit/                   # Cockpit Mode views (Stratux WiFi)
 │   │   ├── map.js                 # Leaflet.js map view
 │   │   ├── engine.js              # Engine monitor view
@@ -2465,7 +2617,7 @@ PilotStation data is split across four storage tiers to work with Stratux's over
 │   │   ├── logbook.js             # Logbook view
 │   │   ├── plates.js              # Approach plate viewer
 │   │   └── admin.js               # Data manager / update UI
-│   ├── planning/                  # Planning Mode views (home/FBO WiFi)
+│   ├── planning/                  # Planning views (deployed to Vercel at flywhere.app/plan)
 │   │   ├── workflow.js            # 6-step guided flow controller
 │   │   ├── aircraft-step.js       # Step 1: Aircraft selection + loading
 │   │   ├── route-step.js          # Step 2: Route entry + optimization
@@ -2474,18 +2626,19 @@ PilotStation data is split across four storage tiers to work with Stratux's over
 │   │   ├── briefing-step.js       # Step 5: Smart briefing + AI analysis
 │   │   ├── ready-step.js          # Step 6: Package assembly + upload
 │   │   ├── dashboard.js           # Dashboard view (all panels, P2)
-│   │   └── planning.css           # Planning Mode light theme overrides
-│   ├── shared/                    # Shared utilities (both modes)
+│   │   └── planning.css           # Planning app light theme overrides
+│   ├── shared/                    # Shared utilities (used by both apps)
 │   │   ├── nasr-db.js             # IndexedDB NASR data access
-│   │   ├── sync-manager.js        # Flight plan package sync
-│   │   ├── weather-client.js      # Weather API client (proxy or direct)
-│   │   ├── ai-client.js           # Claude API client via Cloudflare Worker
+│   │   ├── sync-manager.js        # Flight plan package sync (cockpit → Pi)
+│   │   ├── weather-client.js      # Weather API client (Vercel API routes)
+│   │   ├── ai-client.js           # Claude API client via Vercel API routes
+│   │   ├── fuel-planner.js        # Fuel tic calibration, burn profiles, carry-forward
 │   │   ├── wb-calculator.js       # W&B calculation engine (client-side)
 │   │   ├── flight-plan-model.js   # Flight plan data model
 │   │   └── flight-plan-filer.js   # 1800wxbrief filing + briefing client
 │   ├── style.css                  # Shared design system (cockpit + planning tokens)
-│   ├── manifest.json              # PWA manifest (updated for dual-mode)
-│   ├── service-worker.js          # Dual-mode service worker (mode-aware caching)
+│   ├── manifest.json              # PWA manifest (cockpit mode)
+│   ├── service-worker.js          # Cockpit service worker (Pi-mode caching)
 │   └── lib/
 │       ├── leaflet.min.js         # Map library
 │       ├── chart.min.js           # Charting library (existing)
@@ -2520,16 +2673,13 @@ PilotStation data is split across four storage tiers to work with Stratux's over
 
 **Read path abstraction:** The backend reads config from Tier 1 (`/boot/firmware/pilotstation/`), persistent data from Tier 2 (visible through the overlay), and static data from Tier 4 (visible through the overlay). The `overlay_storage.py` module provides a unified interface that routes reads and writes to the correct tier transparently.
 
-**Cloudflare Worker (separate deployment — see Section 5.8):**
+**Vercel Planning App (separate deployment — see Section 5.7.2):**
 
-```
-pilotstation-worker/
-├── wrangler.toml              # Cloudflare config (account ID, project name, routes)
-└── src/
-    └── index.js               # ~150 lines: route requests, add CORS, proxy to APIs
-```
+The planning app is deployed to `flywhere.app` via Vercel. Source files in `pilotstation/web/planning/` and `pilotstation/web/shared/` are deployed to Vercel alongside Vercel API routes and Vercel Postgres. The planning app includes its own API routes for proxying to external services (weather, filing, Claude).
 
-Deployed to `pilotstation-api.<your-domain>.workers.dev`. Updated independently of the Pi-side PilotStation code.
+**Vercel API Routes (server-side — see Section 5.8):**
+
+External API proxying is handled entirely by Vercel server-side API routes at `flywhere.app/api/*`. No separate proxy service is needed. API keys and vendor credentials are stored as Vercel environment variables.
 
 ---
 
@@ -2578,17 +2728,17 @@ Unified REST API on `localhost:8080`, superseding the current engine_monitor.py 
 | GET       | `/api/wb/scenarios?aircraft={id}`               | List saved loading scenarios for an aircraft      |
 | POST      | `/api/wb/scenarios`                             | Save a loading scenario                           |
 | GET       | `/api/plan/sync-status`                         | Last synced flight plan package timestamp + hash  |
-| POST      | `/api/plan/upload-package`                      | Receive flight plan package from Planning Mode    |
+| POST      | `/api/plan/upload-package`                      | Receive flight plan package from planning app     |
 | GET       | `/api/plan/active-package`                      | Return currently active flight plan package       |
-| GET       | `/api/nasr/export`                              | Compressed NASR bundle for Planning Mode cache (~15 MB) |
+| GET       | `/api/nasr/export`                              | Compressed NASR bundle for planning app cache (~15 MB)  |
 | GET       | `/api/nasr/cycle-info`                          | Current NASR cycle effective/expiration dates      |
 | WebSocket | `/ws/live`                                      | Real-time stream (engine + GPS + traffic + fuel)  |
 
 The WebSocket endpoint replaces polling for the UI — pushes updates at 1Hz for engine data and 5Hz for GPS/traffic.
 
-### Cloudflare Worker Endpoints (Planning Mode) — IMPLEMENTED ✓
+### Planning API Endpoints — IMPLEMENTED ✓
 
-These endpoints run on `pilotstation-api.<your-domain>.workers.dev` and are only used in Planning Mode (see Section 5.8). All routes are implemented in `pilotstation-worker/src/index.js` (201 lines).
+These endpoints are served by Vercel API routes at `flywhere.app/api/*` (see Section 5.8). All external API calls are handled server-side by Vercel functions — no separate proxy service is needed.
 
 | Method | Path                      | Proxies to                               | Purpose                    |
 | ------ | ------------------------- | ---------------------------------------- | -------------------------- |
@@ -2655,40 +2805,43 @@ These endpoints run on `pilotstation-api.<your-domain>.workers.dev` and are only
 - Implement day/night theme switching
 - Test in Safari on iPad over Stratux WiFi
 
-**1d. Dual-Mode PWA Foundation (replaces Companion page): — COMPLETE ✓**
+**1d. Planning App (Vercel) + Cockpit Sync: — COMPLETE ✓**
 
-- ✅ **Mode detection** (MODE-01 through MODE-06): network probe state machine with 3 probes (Pi IP, Cloudflare Worker, offline), manual override modal, 30s re-probe, 5-minute override duration, mode persistence in localStorage
-- ✅ **PWA shell UI**: `index.html` with dual nav bars (planning 6-step / cockpit 6-tab), status bar with mode/aircraft/route/weather/UTC, mode transition notification banner
+- ✅ **Split architecture**: Planning app deployed to Vercel at `flywhere.app/plan` with Vercel Postgres for persistent storage; cockpit PWA on Pi with mode detection for Pi connectivity
+- ✅ **Mode detection** (MODE-01 through MODE-06): Pi network probe, manual override modal, 30s re-probe, 5-minute override duration, mode persistence in localStorage
+- ✅ **PWA shell UI**: `index.html` with cockpit nav bar (6-tab), status bar with mode/aircraft/route/weather/UTC, mode transition notification banner; planning app has separate 6-step nav bar
 - ✅ **IndexedDB schema** (`nasr-db.js`): 10+ object stores — airports, navaids, airways, airspace, weather_cache, flight_plans, wb_scenarios, fuel_prices, aircraft_profiles, ai_briefings, meta
 - ✅ **Style system** (`style.css`, 1,000+ lines): dual-theme CSS custom properties (planning light / cockpit dark / night red), aviation flight category colors, 48-56px touch targets, JetBrains Mono instrument font
 - ✅ **Step 1 (Aircraft)** (`aircraft-step.js`): aircraft selection with radio buttons, per-station weight entry, fuel quantity with tank visualization, POB count, real-time W&B calculations, bootstrap RV-9A profile
 - ✅ **Step 2 (Route)** (`route-step.js`, 1,079 lines — largest module): departure/destination autocomplete, route string parsing, VOR navaid support, per-leg calculations (magnetic heading with declination, distance, IAS→TAS using winds aloft OAT or standard atmosphere, headwind/tailwind component, ground speed, ETE, fuel burn), **phase-of-flight fuel model** (Taxi→Climb→Cruise→Descent with per-leg altitude), **per-leg altitude with CLB/CRZ/DES phase tags**, VFR hemispheric altitude rule, departure time entry (defaults to next 15-min mark), real-time winds aloft from aviationweather.gov
-- ✅ **Step 3 (Weather)** (`weather-step.js`): auto-fetch METARs, TAFs, winds aloft (9 altitude bands), PIREPs, SIGMETs/AIRMETs on step entry; weather staleness detection (>60 min triggers re-fetch); refresh button; flight category determination; IndexedDB caching
+- ✅ **Step 3 (Weather)** (`weather-step.js`): auto-fetch METARs, TAFs, winds aloft (9 altitude bands), PIREPs, SIGMETs/AIRMETs on step entry via Vercel API routes; weather staleness detection (>60 min triggers re-fetch); refresh button; flight category determination; caching
 - ✅ **Step 4 (W&B)** (`wb-step.js`): station-by-station weight input with arm calculations, CG computation, CG envelope diagram, takeoff and landing W&B estimates (fuel burn integration), envelope violation detection
 - ✅ **Step 5 (Briefing)** (`briefing-step.js`): smart briefing with time-of-passage weather analysis, rules-based Go/No-Go checks (METAR flight category, visibility, ceiling, crosswind, gust limits, fuel endurance), official 1800wxbrief standard briefing with confirmation number, NOTAM highlights
 - ✅ **Step 6 (Ready/File)** (`ready-step.js`, 615 lines): summary checklist, flight plan filing form with auto-populated fields (departure time UTC conversion, tail number, route string, cruise altitude, fuel on board, POB), flight rules selection (VFR/IFR), alternate airport, equipment suffix dropdown, remarks, pilot info persistent storage, filing confirmation tracking, amend/cancel, upload to Pi
 - ✅ **Dashboard view** (`dashboard.js`): 2×3 grid showing all 6 steps in condensed form, clickable panels to jump to steps — **pulled forward from Phase 2** (PLAN-02)
-- ✅ **Weather client** (`weather-client.js`, 403 lines): parallel fetch from aviationweather.gov with graceful degradation, METAR decoding (flight category, temp/dewpoint/altimeter/wind/visibility parsing), TAF rendering, winds aloft at 9 altitude bands with temperature extraction for TAS conversion, PIREP/SIGMET/NOTAM fetching, IndexedDB caching with timestamps
+- ✅ **Weather client** (`weather-client.js`, 403 lines): parallel fetch from aviationweather.gov via Vercel API routes with graceful degradation, METAR decoding (flight category, temp/dewpoint/altimeter/wind/visibility parsing), TAF rendering, winds aloft at 9 altitude bands with temperature extraction for TAS conversion, PIREP/SIGMET/NOTAM fetching, caching with timestamps
 - ✅ **W&B calculator** (`wb-calculator.js`): pure computation — CG from moment/weight, station-by-station loading, fuel weight integration (6 lb/gal), CG envelope verification, takeoff/landing estimation
 - ✅ **Flight plan filer** (`flight-plan-filer.js`): 1800wxbrief (Leidos) client for VFR/IFR plans, equipment suffix mapping table, filing/amendment/cancellation, official briefing request, confirmation number tracking
-- ✅ **AI client** (`ai-client.js`, 285 lines): Claude Sonnet 4.5 integration via Cloudflare Worker — weather analysis (AI-04), go/no-go reasoning (AI-05), NOTAM filtering (AI-06), alternate suggestions (AI-07), route optimization (AI-08), fuel checks (AI-09), mandatory disclaimer (AI-10), availability check with graceful degradation (AI-11), CFI-I system prompt (AI-12), rate limiting (20 req/min), IndexedDB caching — **pulled forward from Phase 2**
+- ✅ **AI client** (`ai-client.js`, 285 lines): Claude Sonnet 4.5 integration via Vercel API routes — weather analysis (AI-04), go/no-go reasoning (AI-05), NOTAM filtering (AI-06), alternate suggestions (AI-07), route optimization (AI-08), fuel checks (AI-09), mandatory disclaimer (AI-10), availability check with graceful degradation (AI-11), CFI-I system prompt (AI-12), rate limiting (20 req/min), caching — **pulled forward from Phase 2**
+- ✅ **Fuel planner** (`fuel-planner.js`): Integrated from `capture_v5/fuel-planner.js` v3.3.0 — per-aircraft tic mark polynomial calibration, L/R tank measurement, EDM comparison with last flight, fuel carry-forward between legs, burn rate profiles (65% LOP/75%/ROP/pattern/custom), fuel addition logging, measurement history (100 max), CSV export, **full offline operation via service worker + IndexedDB** (FUEL-06, FUEL-09, FUEL-10, FUEL-12, FUEL-13, FUEL-14, FUEL-15)
 - ✅ **Flight plan model** (`flight-plan-model.js`): FlightPlanPackage class with full schema — aircraft, route/legs, weather cache, W&B snapshot, AI briefing cache, official briefing confirmation, filed plan status
-- ✅ **Sync manager** (`sync-manager.js`): two-way sync on cockpit mode transition, upload staged plan to Pi, download NASR/aircraft/weather, conflict resolution via timestamps, exponential backoff retry (1s/2s/4s), sync state events
-- ✅ **Cloudflare Worker** (`pilotstation-worker/src/index.js`): CORS-enabled proxy with routes for `/wx/*` (METAR, TAF, PIREP, SIGMET, winds, NOTAM), `/fuel-prices`, `/fp/*` (file, amend, cancel, close), `/briefing`, `/claude`, `/health`; per-category rate limiting (60 wx/min, 10 filing/min, 20 AI/min); basic auth for Leidos credentials
-- ✅ **Workflow controller** (`workflow.js`): 6-step state machine, auto-save debouncing to IndexedDB, step validation, module lifecycle (activate/onEnter/render/onLeave)
+- ✅ **Sync manager** (`sync-manager.js`): sync from Vercel → cockpit PWA → Pi on cockpit mode transition, upload staged plan to Pi, download NASR/aircraft/weather, conflict resolution via timestamps, exponential backoff retry (1s/2s/4s), sync state events
+- ✅ **Vercel API routes**: Server-side functions for `/api/wx/*` (METAR, TAF, PIREP, SIGMET, winds, NOTAM), `/api/fuel-prices`, `/api/fp/*` (file, amend, cancel, close), `/api/briefing`, `/api/claude`; per-category rate limiting (60 wx/min, 10 filing/min, 20 AI/min); Leidos credentials in Vercel environment variables
+- ✅ **Vercel deployment**: Planning app hosted at `flywhere.app/plan` with Vercel Postgres for persistent flight plan, aircraft profile, and planning state storage
+- ✅ **Workflow controller** (`workflow.js`): 6-step state machine, auto-save to Vercel Postgres, step validation, module lifecycle (activate/onEnter/render/onLeave)
 - ✅ **App orchestrator** (`app.js`): mode switching, dynamic HTML theming via `data-mode`, UTC clock, alert/toast notification system, bootstrap seed data (sample RV-9A profile, 50+ US airports, VOR navaids)
-- ✅ Auto-save workflow progress to IndexedDB; resume on PWA reopen (PLAN-03)
+- ✅ Auto-save workflow progress to Vercel Postgres; resume from any device (PLAN-03)
 
-**Deliverable:** iPad opens `http://192.168.10.1` in Safari and shows a unified moving map with engine/fuel data (Cockpit Mode). When the iPad is on home WiFi, the same PWA auto-enters Planning Mode with a 6-step pre-flight workflow. Flight plan packages sync to the Pi when the iPad connects to Stratux WiFi. Data updates flow from iPad to Pi. Pi runs headless alongside Stratux.
+**Deliverable:** Pilot opens `flywhere.app/plan` in any browser for pre-flight planning with a 6-step workflow. Flight plan packages are saved to Vercel Postgres. iPad opens `http://192.168.10.1` in Safari and shows the cockpit UI (Cockpit Mode). Flight plan packages sync from Vercel to the cockpit PWA and upload to the Pi when the iPad connects to Stratux WiFi. Pi runs headless alongside Stratux.
 
-**Note:** Pi-side sync endpoints (`upload-package`, `sync-status`, `active-package`, `nasr/export`) require Phase 1b FastAPI backend — the PWA client-side sync manager is implemented and ready.
+**Note:** Pi-side sync endpoints (`upload-package`, `sync-status`, `active-package`, `nasr/export`) require Phase 1b FastAPI backend — the cockpit PWA client-side sync manager is implemented and ready.
 
 ### Phase 2: Advanced Planning & AI — PARTIALLY COMPLETE
 
 **Goal:** Add AI copilot, advanced weather (profile view, smart briefing), and complete the planning workflow with W&B and fuel stop optimization
 
 **AI copilot integration (see Section 6.12): — CLIENT-SIDE COMPLETE ✓ (pulled forward to Phase 1d)**
-- ✅ Deploy Cloudflare Worker `/claude` route with API key secret (AI-01, AI-02, AI-03) — implemented in `pilotstation-worker/src/index.js`
+- ✅ Deploy Vercel API route for Claude API with API key in environment variables (AI-01, AI-02, AI-03)
 - ✅ Weather analysis: plain-English decode of METARs/TAFs/PIREPs (AI-04) — implemented in `ai-client.js`
 - ✅ Go/No-Go reasoning against personal minimums (AI-05) — implemented in `ai-client.js`
 - ✅ NOTAM filtering: identify operationally significant NOTAMs (AI-06) — implemented in `ai-client.js`
@@ -2698,9 +2851,9 @@ These endpoints run on `pilotstation-api.<your-domain>.workers.dev` and are only
 - ✅ Advisory disclaimer on all AI output (AI-10) — implemented in `ai-client.js`
 - ✅ Graceful degradation when offline (AI-11) — implemented in `ai-client.js`
 - ✅ CFI-I system prompt context (AI-12) — implemented in `ai-client.js`
-- ✅ Rate limiting: 20 Claude requests/minute (AI-03) — implemented in Cloudflare Worker
+- ✅ Rate limiting: 20 Claude requests/minute (AI-03) — implemented in Vercel middleware
 - ✅ IndexedDB caching of AI responses (AI-09) — implemented in `ai-client.js`
-- ⬜ Upgrade Planning Mode Step 5 (Briefing) UI with AI-powered analysis — client exists, Step 5 integration pending
+- ⬜ Upgrade planning app Step 5 (Briefing) UI with AI-powered analysis — client exists, Step 5 integration pending
 
 **Dashboard view: — COMPLETE ✓ (pulled forward to Phase 1d)**
 - ✅ Dashboard view for experienced pilots (PLAN-02) — implemented in `dashboard.js`
@@ -2714,9 +2867,9 @@ These endpoints run on `pilotstation-api.<your-domain>.workers.dev` and are only
 
 **Planning workflow remaining items:**
 - ⬜ Weight & balance calculator: full Pi-side implementation (WB-01 through WB-10) — cockpit-side W&B view, real-time fuel weight CG shift (WB-06), saved scenarios API, PDF export. Phase 1d provides client-side calculation; Phase 2 adds the complete cockpit module
-- ⬜ Fuel stop planning with live price comparison (FLT-08, FLT-09, FLT-10) — requires internet, fits Planning Mode
+- ⬜ Fuel stop planning with live price comparison (FLT-08, FLT-09, FLT-10) — requires internet, fits planning app
 
-**Deliverable:** Planning Mode with full AI copilot — weather analysis, go/no-go, NOTAM filtering, W&B, fuel stops. WX view with profile cross-section. Smart Briefing with AI-powered summaries.
+**Deliverable:** Planning app (`flywhere.app/plan`) with full AI copilot — weather analysis, go/no-go, NOTAM filtering, W&B, fuel stops. WX view with profile cross-section. Smart Briefing with AI-powered summaries.
 
 ### Phase 3: Flight Planning (Cockpit-Side) & Logbook — NOT STARTED
 
@@ -2738,7 +2891,7 @@ These endpoints run on `pilotstation-api.<your-domain>.workers.dev` and are only
 - VFR/IFR close reminder after landing detection with ETA countdown (FILE-09)
 - API close when pilot returns to internet WiFi with unclosed plan (FILE-08)
 
-**Deliverable:** Complete workflow from pre-flight planning (Planning Mode) → flight plan filing → in-flight tracking with route overlay and filed plan reminders → post-flight auto-logging with close reminder, currency tracking, and Savvy export.
+**Deliverable:** Complete workflow from pre-flight planning (`flywhere.app/plan`) → flight plan filing → in-flight tracking with route overlay and filed plan reminders → post-flight auto-logging with close reminder, currency tracking, and Savvy export.
 
 ### Phase 4: Polish & Integration — NOT STARTED
 
@@ -2767,8 +2920,8 @@ These endpoints run on `pilotstation-api.<your-domain>.workers.dev` and are only
 | FAA regulatory                         | EFB certification questions                     | Advisory use only — pilot remains responsible for current charts per AC 91-78A                                                      |
 | Expired chart/plate data               | Flying with outdated procedures                 | Startup warning if any data expired; Data Manager shows days remaining; 28/56-day reminders; pilot responsibility per AC 91-78A     |
 | Single point of failure                | Pi failure = no engine/fuel/map data            | iPad retains paper chart capability; Garmin GPS 175 remains primary IFR navigation; engine gauges on panel remain functional        |
-| Cloudflare Worker outage               | No weather fetch or AI in Planning Mode         | Planning Mode degrades gracefully — shows "service unavailable, try again"; cached data in IndexedDB still available                |
-| Claude API cost creep                  | Unexpected API charges                          | Rate limiting in Worker (20 req/min); bounded max_tokens (4096); Haiku model for routine tasks (~$0.05/session); monthly budget alert |
+| Vercel outage                          | No access to planning app or saved flight plans | Full offline support via service worker + IndexedDB; planning workflow works offline with cached data; flight plans sync when online  |
+| Claude API cost creep                  | Unexpected API charges                          | Rate limiting in Vercel middleware (20 req/min); bounded max_tokens (4096); Haiku model for routine tasks (~$0.05/session); monthly budget alert |
 | Safari IndexedDB eviction              | Cached NASR/weather data lost                   | PWA installed to home screen gets persistent storage; re-sync from Pi on next Stratux WiFi connection; prompt user to re-fetch       |
 | AI hallucination in Go/No-Go           | Incorrect weather analysis could influence decision | Mandatory advisory disclaimer (AI-10); raw METARs/TAFs always displayed alongside AI summary; PIC retains decision authority        |
 | Mode detection false positive          | PWA enters wrong mode on captive portal WiFi    | Manual mode override in status bar (MODE-04); 30s re-probe interval auto-corrects; IP heuristic as fast fallback                    |
@@ -2793,13 +2946,13 @@ These endpoints run on `pilotstation-api.<your-domain>.workers.dev` and are only
 | Flight log auto-detection accuracy     | > 90% correct departure/arrival                                            |
 | Fuel tracking accuracy vs. manual      | Within 1 gallon over 3-hour flight                                         |
 | Chart tile update cycle                | < 30 minutes to process and deploy new 56-day cycle                        |
-| Planning Mode: mode detection          | < 3 seconds from PWA load to correct mode activation                       |
-| Planning Mode: weather fetch           | < 5 seconds for full route weather via Cloudflare Worker                   |
-| Planning Mode: AI briefing generation  | < 10 seconds for complete Claude analysis (weather + go/no-go + NOTAMs)    |
-| Planning Mode: flight plan upload      | < 5 seconds to upload package to Pi over Stratux WiFi                      |
-| Planning Mode: full workflow           | < 10 minutes from opening PWA to "Ready" step with all data               |
-| Planning Mode: flight plan filing      | < 5 seconds to file VFR/IFR plan via Cloudflare Worker → 1800wxbrief      |
-| Planning Mode: official briefing       | < 8 seconds to obtain standard briefing with confirmation number           |
+| Planning app: page load                | < 3 seconds for `flywhere.app/plan` initial load                           |
+| Planning app: weather fetch            | < 5 seconds for full route weather via Vercel API routes                   |
+| Planning app: AI briefing generation   | < 10 seconds for complete Claude analysis (weather + go/no-go + NOTAMs)    |
+| Planning → cockpit: flight plan upload | < 5 seconds to upload package to Pi over Stratux WiFi                      |
+| Planning app: full workflow            | < 10 minutes from opening `flywhere.app/plan` to "Ready" step with all data |
+| Planning app: flight plan filing       | < 5 seconds to file VFR/IFR plan via Vercel API routes → 1800wxbrief      |
+| Planning app: official briefing        | < 8 seconds to obtain standard briefing with confirmation number           |
 | Cockpit Mode: close reminder           | Close reminder appears within 30 seconds of landing detection              |
 
 ---
@@ -2809,11 +2962,11 @@ These endpoints run on `pilotstation-api.<your-domain>.workers.dev` and are only
 - **FAA certification** — This is an advisory/supplemental tool, not a certified EFB
 - **Commercial distribution** — Personal use project
 - **Fleet management** — Supports multiple stored aircraft profiles for W&B and engine config, but not multi-aircraft tracking or fleet dispatch
-- **Native iOS app** — Web/PWA only; no Xcode, no App Store, no Apple developer account needed
+- **Native iOS app** — Web only (Vercel for planning, PWA for cockpit); no Xcode, no App Store, no Apple developer account needed
 - **Synthetic vision** — Defer to Phase 4+ at earliest
 - **ADS-B Out** — Stratux is receive-only; ADS-B Out handled by panel transponder
 - **Voice control** — Cockpit noise makes voice unreliable
-- **Cellular connectivity in flight** — WiFi/internet is pre-flight only; in-flight data comes from ADS-B/FIS-B
+- **Cellular connectivity in flight** — internet is pre-flight only (planning at `flywhere.app/plan`); in-flight data comes from ADS-B/FIS-B
 - **Replacing the Garmin GPS 175** — GPS 175 remains the primary IFR navigator; PilotStation is supplemental situational awareness
 
 ---
@@ -2844,6 +2997,7 @@ These endpoints run on `pilotstation-api.<your-domain>.workers.dev` and are only
 | avwx-engine (Python)        | pypi.org/project/avwx-engine       | MIT                 | METAR/TAF parsing and decoding                         |
 | Leidos 1800wxbrief API      | 1800wxbrief.com                    | Free (registration) | Official weather briefings + VFR/IFR flight plan filing (vendor registration required) |
 | Claude API (optional)       | anthropic.com                      | Commercial          | AI briefing summarization, route suggestion (optional) |
+| Vercel                      | vercel.com                         | Free tier           | Hosting for planning app (`flywhere.app`), Postgres database, server-side API routes |
 
 ---
 

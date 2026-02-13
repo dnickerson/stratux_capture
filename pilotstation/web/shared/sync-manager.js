@@ -6,6 +6,7 @@
 
 class SyncManager {
     static PI_BASE = 'http://192.168.10.1';
+    static NASR_REMOTE = 'https://flywhere.app/data/nasr';
     static MAX_RETRIES = 3;
     static RETRY_DELAYS = [1000, 2000, 4000]; // Exponential backoff
 
@@ -116,34 +117,76 @@ class SyncManager {
     }
 
     /**
-     * Sync NASR data from Pi if our local data is stale or missing.
+     * Sync NASR data — tries Pi first, falls back to flywhere.app.
      */
     async _syncNasrData() {
+        const localCycle = await this.db.getCycleInfo();
+
+        // Try Pi first (cockpit mode)
         try {
-            // Check cycle info
             const cycleResp = await this._fetchWithTimeout(
                 `${SyncManager.PI_BASE}/api/nasr/cycle-info`
             );
-            if (!cycleResp.ok) return;
-
-            const piCycle = await cycleResp.json();
-            const localCycle = await this.db.getCycleInfo();
-
-            // If Pi has newer cycle, download NASR data
-            if (!localCycle || piCycle.effective_date !== localCycle.effective_date) {
-                const nasrResp = await this._fetchWithTimeout(
-                    `${SyncManager.PI_BASE}/api/nasr/export`,
-                    {},
-                    30000 // 30s timeout for large download
-                );
-                if (nasrResp.ok) {
-                    const bundle = await nasrResp.json();
-                    await this.db.importNasrBundle(bundle);
+            if (cycleResp.ok) {
+                const piCycle = await cycleResp.json();
+                if (!localCycle || piCycle.effective_date !== localCycle.effective_date) {
+                    const nasrResp = await this._fetchWithTimeout(
+                        `${SyncManager.PI_BASE}/api/nasr/export`,
+                        {},
+                        30000
+                    );
+                    if (nasrResp.ok) {
+                        const bundle = await nasrResp.json();
+                        await this.db.importNasrBundle(bundle);
+                        return;
+                    }
+                } else {
+                    return; // Already current
                 }
             }
+        } catch {
+            // Pi not reachable — try remote
+        }
+
+        // Fall back to flywhere.app (planning mode)
+        await this._syncNasrFromRemote(localCycle);
+    }
+
+    /**
+     * Download NASR bundle from flywhere.app (gzipped, ~3.7 MB).
+     * Uses DecompressionStream to inflate client-side.
+     */
+    async _syncNasrFromRemote(localCycle) {
+        try {
+            // Check remote cycle info
+            const cycleResp = await this._fetchWithTimeout(
+                `${SyncManager.NASR_REMOTE}/cycle_info.json`
+            );
+            if (!cycleResp.ok) return;
+
+            const remoteCycle = await cycleResp.json();
+            if (localCycle && localCycle.effective_date === remoteCycle.effective_date) {
+                return; // Already current
+            }
+
+            console.log('Downloading NASR bundle from flywhere.app...');
+            const resp = await this._fetchWithTimeout(
+                `${SyncManager.NASR_REMOTE}/bundle.json.gz`,
+                {},
+                60000 // 60s timeout for large download
+            );
+            if (!resp.ok) return;
+
+            // Decompress gzip stream
+            const ds = new DecompressionStream('gzip');
+            const decompressed = resp.body.pipeThrough(ds);
+            const text = await new Response(decompressed).text();
+            const bundle = JSON.parse(text);
+
+            await this.db.importNasrBundle(bundle);
+            console.log('NASR bundle imported from flywhere.app');
         } catch (err) {
-            console.warn('NASR sync failed:', err);
-            // Non-fatal — we can work with existing data
+            console.warn('Remote NASR sync failed:', err);
         }
     }
 
